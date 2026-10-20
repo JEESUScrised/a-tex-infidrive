@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"ytdrive/internal/blobstore"
 	"ytdrive/internal/config"
 	"ytdrive/internal/cryptoutil"
+	"ytdrive/internal/drive"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/httpapi"
 	"ytdrive/internal/jobs"
@@ -27,7 +29,7 @@ func main() {
 		log.Fatalf("конфигурация: %v", err)
 	}
 	addr := flag.String("addr", cfg.Addr, "адрес HTTP")
-	data := flag.String("data", cfg.StoragePath, "каталог данных")
+	data := flag.String("data", cfg.StoragePath, "каталог метаданных SQLite")
 	flag.Parse()
 	cfg.Addr = *addr
 	cfg.StoragePath = *data
@@ -44,7 +46,7 @@ func main() {
 	}
 	log.Printf("%s: диагностика FFmpeg: %s", cfg.AppName, ffmpeg.Diagnose(cfg.FFmpeg, cfg.FFProbe))
 	if err := ffmpeg.New(cfg.FFmpeg, cfg.FFProbe).Available(); err != nil {
-		log.Printf("предупреждение: %v — задания кодирования завершатся ошибкой", err)
+		log.Printf("предупреждение: %v — experimental encode будет недоступен", err)
 	}
 
 	store, err := storage.OpenPaths(storage.Paths{
@@ -66,6 +68,31 @@ func main() {
 		log.Printf("OAuth-токены: шифрование at rest включено")
 	}
 
+	blobs, err := blobstore.NewFromConfig(blobstore.Config{
+		Provider:          cfg.BlobProvider,
+		S3Endpoint:        cfg.S3Endpoint,
+		S3Region:          cfg.S3Region,
+		S3Bucket:          cfg.S3Bucket,
+		S3AccessKeyID:     cfg.S3AccessKeyID,
+		S3SecretAccessKey: cfg.S3SecretAccessKey,
+		S3ForcePathStyle:  cfg.S3ForcePathStyle,
+		S3Prefix:          cfg.S3Prefix,
+	})
+	if err != nil {
+		log.Fatalf("blobstore: %v", err)
+	}
+	if cfg.BlobProvider == "memory" {
+		log.Printf("STORAGE_PROVIDER=memory — только для development; пользовательские файлы в RAM процесса")
+	} else {
+		log.Printf("STORAGE_PROVIDER=%s bucket=%s", cfg.BlobProvider, cfg.S3Bucket)
+	}
+
+	driveMeta, err := drive.Open(store.DB())
+	if err != nil {
+		log.Fatalf("drive meta: %v", err)
+	}
+	driveSvc := drive.NewService(driveMeta, blobs, cfg.PublicURL, cfg.MaxUpload)
+
 	if cfg.AuthEnabled {
 		log.Printf("режим доступа: single-admin (%s)", cfg.AdminUsername)
 	} else {
@@ -80,13 +107,11 @@ func main() {
 			RedirectURL:  cfg.GoogleRedirectURL,
 		}, store)
 		if err != nil {
-			log.Printf("YouTube: %v", err)
+			log.Printf("YouTube experimental: %v", err)
 		} else {
 			yt = svc
-			log.Printf("YouTube Data API: OAuth настроен, redirect=%s", cfg.GoogleRedirectURL)
+			log.Printf("YouTube experimental: OAuth настроен (не в пользовательском UI)")
 		}
-	} else {
-		log.Printf("YouTube: GOOGLE_CLIENT_ID/SECRET не заданы — загрузка отключена")
 	}
 
 	manager := jobs.New(store, cfg.Encode, cfg.Workers, cfg.QueueSize, yt)
@@ -95,12 +120,12 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(store, manager, cfg, yt).Handler(),
+		Handler:           httpapi.NewWithDrive(store, manager, cfg, yt, driveSvc).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("%s слушает %s, данные в %s", cfg.AppName, cfg.Addr, cfg.StoragePath)
+		log.Printf("%s слушает %s, метаданные в %s", cfg.AppName, cfg.Addr, cfg.StoragePath)
 		errCh <- srv.ListenAndServe()
 	}()
 

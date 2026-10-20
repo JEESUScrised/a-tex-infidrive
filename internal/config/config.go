@@ -57,6 +57,16 @@ type Config struct {
 	AuthEnabled bool
 	// CookieSecure — принудительный Secure для cookies (или авто по PublicURL/HTTPS).
 	CookieSecure bool
+
+	// BlobProvider: s3 | memory (memory только для development/tests).
+	BlobProvider       string
+	S3Endpoint         string
+	S3Region           string
+	S3Bucket           string
+	S3AccessKeyID      string
+	S3SecretAccessKey  string
+	S3ForcePathStyle   bool
+	S3Prefix           string
 }
 
 // Load собирает конфигурацию. Уже заданные переменные окружения важнее .env.
@@ -117,6 +127,21 @@ func Load() (Config, error) {
 		AdminPasswordHash:  firstEnv("ADMIN_PASSWORD_HASH", ""),
 		SessionSecret:      firstEnv("SESSION_SECRET", ""),
 		TokenEncryptionKey: encKey,
+		BlobProvider:       strings.ToLower(env("STORAGE_PROVIDER", "")),
+		S3Endpoint:         firstEnv("S3_ENDPOINT", ""),
+		S3Region:           firstEnv("S3_REGION", "auto"),
+		S3Bucket:           firstEnv("S3_BUCKET", ""),
+		S3AccessKeyID:      firstEnv("S3_ACCESS_KEY_ID", ""),
+		S3SecretAccessKey:  firstEnv("S3_SECRET_ACCESS_KEY", ""),
+		S3ForcePathStyle:   envBool("S3_FORCE_PATH_STYLE", true),
+		S3Prefix:           firstEnv("S3_PREFIX", "infidrive"),
+	}
+	if cfg.BlobProvider == "" {
+		if cfg.S3Bucket != "" && cfg.S3AccessKeyID != "" {
+			cfg.BlobProvider = "s3"
+		} else {
+			cfg.BlobProvider = "memory"
+		}
 	}
 
 	// Опционально: хеш из plaintext только вне production (удобство разработки).
@@ -183,6 +208,12 @@ func (c Config) Validate() error {
 	}
 	if c.PublicURL == "" || !strings.HasPrefix(c.PublicURL, "https://") {
 		errs = append(errs, "PUBLIC_URL должен быть https://…")
+	}
+	if c.BlobProvider != "s3" {
+		errs = append(errs, "в production STORAGE_PROVIDER должен быть s3 (memory запрещён)")
+	}
+	if c.S3Bucket == "" || c.S3AccessKeyID == "" || c.S3SecretAccessKey == "" {
+		errs = append(errs, "нужны S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY")
 	}
 	if c.GoogleRedirectURL != "" && strings.HasPrefix(c.GoogleRedirectURL, "http://") && !strings.Contains(c.GoogleRedirectURL, "localhost") {
 		errs = append(errs, "GOOGLE_REDIRECT_URL в production должен использовать HTTPS")
@@ -295,6 +326,21 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func loadDotEnv(path string) {

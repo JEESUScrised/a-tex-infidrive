@@ -24,6 +24,10 @@ func TestProductionRequiresAuth(t *testing.T) {
 	t.Setenv("SESSION_SECRET", "this-is-a-sufficiently-long-random-session-secret-value-ok")
 	t.Setenv("TOKEN_ENCRYPTION_KEY", hex.EncodeToString(make([]byte, 32)))
 	t.Setenv("PUBLIC_URL", "https://app.a-tex-infidrive.ru")
+	t.Setenv("STORAGE_PROVIDER", "s3")
+	t.Setenv("S3_BUCKET", "bucket")
+	t.Setenv("S3_ACCESS_KEY_ID", "key")
+	t.Setenv("S3_SECRET_ACCESS_KEY", "secret")
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected missing admin error")
@@ -63,6 +67,8 @@ func clearProdEnvs(t *testing.T) {
 		"ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_PASSWORD_HASH",
 		"SESSION_SECRET", "TOKEN_ENCRYPTION_KEY",
 		"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URL",
+		"STORAGE_PROVIDER", "S3_ENDPOINT", "S3_REGION", "S3_BUCKET",
+		"S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_FORCE_PATH_STYLE", "S3_PREFIX",
 	}
 	for _, k := range keys {
 		// Пустое значение блокирует подстановку из локального .env в тестах.

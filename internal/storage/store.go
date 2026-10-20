@@ -177,6 +177,9 @@ func (s *Store) Close() error {
 
 func (s *Store) Root() string { return s.root }
 
+// DB возвращает соединение SQLite для смежных модулей метаданных (drive).
+func (s *Store) DB() *sql.DB { return s.db }
+
 func (s *Store) migrate() error {
 	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS files (
