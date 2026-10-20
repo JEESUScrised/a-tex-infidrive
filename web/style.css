@@ -1,0 +1,69 @@
+:root {
+  color: #1c2430;
+  background: #f4f6f8;
+  font-family: "Segoe UI", sans-serif;
+  line-height: 1.4;
+}
+
+body {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+header, section {
+  background: #fff;
+  border: 1px solid #d5dde6;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+h1, h2 { margin: 0 0 8px; }
+h1 { font-size: 28px; }
+h2 { font-size: 18px; }
+
+button {
+  background: #1f6feb;
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #9aa7b5;
+  cursor: default;
+}
+
+input[type="file"] { margin-right: 8px; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  border-bottom: 1px solid #e3e8ee;
+  padding: 8px 6px;
+  vertical-align: top;
+  font-size: 14px;
+}
+
+.hash { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
+.error { color: #a32020; min-height: 1.2em; }
+.ok { color: #0d6b3a; }
+.progress {
+  height: 8px;
+  background: #e6ebf1;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: #1f6feb;
+}

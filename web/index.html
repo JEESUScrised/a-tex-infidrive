@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YTDrive</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>YTDrive</h1>
+    <p>Локальное кодирование файла в MP4 и восстановление обратно.</p>
+    <p id="health">проверка сервера…</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Загрузить файл</h2>
+      <form id="upload-form">
+        <input id="upload-file" type="file" required>
+        <button type="submit">Сохранить</button>
+      </form>
+      <p id="upload-error" class="error"></p>
+    </section>
+
+    <section>
+      <h2>Файлы</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Имя</th>
+            <th>Размер</th>
+            <th>SHA-256</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="files"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Восстановить из MP4</h2>
+      <form id="recover-form">
+        <input id="recover-file" type="file" accept="video/mp4,.mp4" required>
+        <button type="submit">Восстановить</button>
+      </form>
+      <p id="recover-error" class="error"></p>
+    </section>
+
+    <section>
+      <h2>История заданий</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Тип</th>
+            <th>Статус</th>
+            <th>Прогресс</th>
+            <th>Сообщение</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="jobs"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>YouTube</h2>
+      <p id="youtube">Загрузка на YouTube в этой версии не реализована.</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
