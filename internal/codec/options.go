@@ -1,0 +1,161 @@
+package codec
+
+import (
+	"fmt"
+
+	"ytdrive/internal/packets"
+	"ytdrive/internal/video"
+)
+
+// Options задаёт параметры кодирования. Для разбора видео геометрия не обязательна:
+// декодер читает сетку из заголовка кадра.
+type Options struct {
+	Width        int
+	Height       int
+	Block        int
+	FPS          int
+	CRF          int
+	Preset       string
+	BitrateK     int
+	GOP          int
+	FrameRepeat  int
+	PacketRepeat int
+	ParityGroup  int
+	ChunkSize    int
+	Gzip         bool
+	Luma0        byte
+	Luma1        byte
+	FFmpeg       string
+	FFProbe      string
+	// DisplayName попадает в метаданные кадра. Пустое значение — имя входного файла.
+	// Веб-сервер хранит байты под безопасным именем и передаёт сюда исходное имя пользователя.
+	DisplayName string
+}
+
+// ProgressFunc сообщает, сколько уникальных кадров уже обработано.
+type ProgressFunc func(done, total int)
+
+// EncodeResult — итог кодирования.
+type EncodeResult struct {
+	OriginalSize int64
+	StoredSize   int64
+	SHA256Hex    string
+	Frames       int
+	Packets      int
+	Width        int
+	Height       int
+	FileID       uint32
+}
+
+// DecodeResult — итог восстановления. Файл записан только если SHA-256 совпал.
+type DecodeResult struct {
+	Name             string
+	MIME             string
+	SHA256Hex        string
+	Size             int64
+	FramesSeen       int
+	UniqueFrames     int
+	DuplicateFrames  int
+	SkippedFrames    int
+	CorruptPackets   int
+	RecoveredPackets int
+	DataPackets      int
+}
+
+// DefaultOptions — устойчивые значения для локального MP4 720p.
+func DefaultOptions() Options {
+	return Options{
+		Width:        1280,
+		Height:       720,
+		Block:        16,
+		FPS:          10,
+		CRF:          16,
+		Preset:       "veryfast",
+		GOP:          1,
+		FrameRepeat:  2,
+		PacketRepeat: 2,
+		ParityGroup:  8,
+		ChunkSize:    360,
+		Luma0:        16,
+		Luma1:        235,
+		FFmpeg:       "ffmpeg",
+		FFProbe:      "ffprobe",
+	}
+}
+
+var presets = map[string]struct{}{
+	"ultrafast": {},
+	"superfast": {},
+	"veryfast":  {},
+	"faster":    {},
+	"fast":      {},
+	"medium":    {},
+	"slow":      {},
+	"slower":    {},
+	"veryslow":  {},
+}
+
+// PrepareEncode проверяет параметры и подставляет путь к FFmpeg.
+func (o *Options) PrepareEncode() error {
+	if o.FFmpeg == "" {
+		o.FFmpeg = "ffmpeg"
+	}
+	if o.FFProbe == "" {
+		o.FFProbe = "ffprobe"
+	}
+	if o.Width < 64 || o.Height < 64 || o.Width > 3840 || o.Height > 2160 {
+		return fmt.Errorf("разрешение %dx%d вне диапазона", o.Width, o.Height)
+	}
+	if o.Block < 4 || o.Block > 64 {
+		return fmt.Errorf("размер блока %d недопустим", o.Block)
+	}
+	if o.FPS < 1 || o.FPS > 60 {
+		return fmt.Errorf("fps должен быть от 1 до 60")
+	}
+	if o.BitrateK == 0 && (o.CRF < 0 || o.CRF > 51) {
+		return fmt.Errorf("crf должен быть от 0 до 51")
+	}
+	if o.BitrateK != 0 && (o.BitrateK < 100 || o.BitrateK > 50000) {
+		return fmt.Errorf("битрейт должен быть от 100 до 50000 кбит/с")
+	}
+	if _, ok := presets[o.Preset]; !ok {
+		return fmt.Errorf("неизвестный preset %q", o.Preset)
+	}
+	if o.GOP < 1 || o.GOP > 300 {
+		return fmt.Errorf("gop должен быть от 1 до 300")
+	}
+	if o.FrameRepeat < 1 || o.FrameRepeat > 8 {
+		return fmt.Errorf("frame-repeat должен быть от 1 до 8")
+	}
+	if o.PacketRepeat < 1 || o.PacketRepeat > 8 {
+		return fmt.Errorf("packet-repeat должен быть от 1 до 8")
+	}
+	if o.ParityGroup < 0 || o.ParityGroup > 64 {
+		return fmt.Errorf("parity-group должен быть от 0 до 64")
+	}
+	if o.ChunkSize < 16 || o.ChunkSize > 4096 {
+		return fmt.Errorf("размер пакета данных %d недопустим", o.ChunkSize)
+	}
+	if int(o.Luma1) < int(o.Luma0)+32 {
+		return fmt.Errorf("контраст уровней яркости слишком мал")
+	}
+	layout, err := video.NewLayout(o.Width, o.Height, o.Block)
+	if err != nil {
+		return err
+	}
+	if packets.EncodedSize(o.ChunkSize) > layout.PayloadCap() {
+		maxPayload := layout.PayloadCap() - packets.Overhead
+		return fmt.Errorf("блок данных %d байт не помещается в кадр (максимум %d)", o.ChunkSize, maxPayload)
+	}
+	return nil
+}
+
+// PrepareDecode заполняет только пути к внешним утилитам.
+func (o *Options) PrepareDecode() {
+	if o.FFmpeg == "" {
+		o.FFmpeg = "ffmpeg"
+	}
+	if o.FFProbe == "" {
+		o.FFProbe = "ffprobe"
+	}
+}
