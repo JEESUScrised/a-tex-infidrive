@@ -14,6 +14,7 @@ import (
 
 	"ytdrive/internal/auth"
 	"ytdrive/internal/config"
+	"ytdrive/internal/drive"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/jobs"
 	"ytdrive/internal/storage"
@@ -28,6 +29,7 @@ type Server struct {
 	jobs     *jobs.Manager
 	cfg      config.Config
 	youtube  youtube.VideoStorageProvider
+	drive    *drive.Service
 	web      http.Handler
 	sessions *auth.Manager
 	limiter  *auth.LoginLimiter
@@ -35,6 +37,11 @@ type Server struct {
 
 // New собирает HTTP-обработчик. Каталог данных не публикуется.
 func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider) *Server {
+	return NewWithDrive(store, manager, cfg, yt, nil)
+}
+
+// NewWithDrive — полный конструктор с облачным диском.
+func NewWithDrive(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider, driveSvc *drive.Service) *Server {
 	web := resolveWebDir(cfg.WebDir)
 	if yt == nil {
 		yt = youtube.Unconfigured{}
@@ -44,6 +51,7 @@ func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt yout
 		jobs:    manager,
 		cfg:     cfg,
 		youtube: yt,
+		drive:   driveSvc,
 		web:     spaFileServer(web),
 		limiter: auth.NewLoginLimiter(10, 15*time.Minute),
 	}
@@ -66,6 +74,15 @@ func (s *Server) Handler() http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			s.handleAPI(w, r)
 			return
+		}
+		// Публичная share-ссылка без авторизации.
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/s/") {
+			token := strings.TrimPrefix(r.URL.Path, "/s/")
+			token = strings.Trim(token, "/")
+			if token != "" && !strings.Contains(token, "/") {
+				s.publicShareDownload(w, r, token)
+				return
+			}
 		}
 		s.web.ServeHTTP(w, r)
 	})
@@ -107,6 +124,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !s.requireAuth(w, r) {
+		return
+	}
+
+	if s.handleDrive(w, r, path, parts) {
 		return
 	}
 
