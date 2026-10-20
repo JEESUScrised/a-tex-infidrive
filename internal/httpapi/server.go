@@ -86,6 +86,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.listJobs(w, r)
 	case r.Method == http.MethodGet && len(parts) == 2 && parts[0] == "jobs":
 		s.getJob(w, r, parts[1])
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "jobs" && parts[2] == "cancel":
+		s.cancelJob(w, r, parts[1])
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "jobs" && parts[2] == "download":
 		s.downloadJob(w, r, parts[1])
 	default:
@@ -94,10 +96,16 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	runner := ffmpeg.New(s.cfg.FFmpeg, s.cfg.FFProbe)
+	ok := runner.Available() == nil
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"version": version,
-		"ffmpeg":  ffmpeg.New(s.cfg.FFmpeg, s.cfg.FFProbe).Available() == nil,
+		"status":        "ok",
+		"version":       version,
+		"ffmpeg":        ok,
+		"ffmpeg_path":   s.cfg.FFmpeg,
+		"ffprobe_path":  s.cfg.FFProbe,
+		"ffmpeg_source": s.cfg.FFmpegSource,
+		"ffmpeg_info":   ffmpeg.Diagnose(s.cfg.FFmpeg, s.cfg.FFProbe),
 	})
 }
 
@@ -263,6 +271,26 @@ func (s *Server) getJob(w http.ResponseWriter, _ *http.Request, id string) {
 	writeJSON(w, http.StatusOK, job)
 }
 
+func (s *Server) cancelJob(w http.ResponseWriter, _ *http.Request, id string) {
+	if err := s.jobs.Cancel(id); err != nil {
+		switch {
+		case errors.Is(err, jobs.ErrNotCancellable):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, storage.ErrNotFound), errors.Is(err, storage.ErrInvalidID):
+			writeError(w, http.StatusNotFound, "не найдено")
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	job, err := s.store.GetJob(id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
 func (s *Server) downloadJob(w http.ResponseWriter, r *http.Request, id string) {
 	job, err := s.store.GetJob(id)
 	if err != nil {
@@ -309,7 +337,7 @@ func writeJobError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, storage.ErrNotFound), errors.Is(err, storage.ErrInvalidID):
 		writeError(w, http.StatusNotFound, "файл не найден")
-	case errors.Is(err, jobs.ErrBusy):
+	case errors.Is(err, jobs.ErrBusy), errors.Is(err, jobs.ErrNotCancellable):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, jobs.ErrQueueFull):
 		writeError(w, http.StatusTooManyRequests, err.Error())

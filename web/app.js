@@ -31,10 +31,14 @@ function sizeText(n) {
 async function refreshHealth() {
   try {
     const data = await api("/api/health");
-    health.textContent = data.ffmpeg
-      ? "Сервер работает, FFmpeg найден."
-      : "Сервер работает, но FFmpeg не найден. Кодирование завершится ошибкой.";
-    health.className = data.ffmpeg ? "ok" : "error";
+    if (data.ffmpeg) {
+      health.textContent = "Сервер работает, FFmpeg найден" +
+        (data.ffmpeg_source ? " (" + data.ffmpeg_source + ")." : ".");
+      health.className = "ok";
+    } else {
+      health.textContent = "Сервер работает, но FFmpeg не найден. Кодирование завершится ошибкой.";
+      health.className = "error";
+    }
     const yt = await api("/api/youtube");
     youtube.textContent = yt.message;
   } catch (err) {
@@ -113,6 +117,22 @@ async function refreshJobs() {
     message.textContent = job.error || job.message || "";
     if (job.error) message.className = "error";
     const actions = document.createElement("td");
+    if (job.status === "queued" || job.status === "running") {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "отмена";
+      cancel.addEventListener("click", async () => {
+        cancel.disabled = true;
+        try {
+          await api("/api/jobs/" + job.id + "/cancel", { method: "POST" });
+          await refreshJobs();
+        } catch (err) {
+          uploadError.textContent = err.message;
+          cancel.disabled = false;
+        }
+      });
+      actions.append(cancel);
+    }
     if (job.status === "succeeded") {
       const link = document.createElement("a");
       link.href = "/api/jobs/" + job.id + "/download";
