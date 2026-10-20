@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,11 +34,56 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request, path str
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "drive" && parts[2] == "restore":
 		s.pipelineManualRestore(w, r, parts[1])
 		return true
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "drive" && parts[2] == "restore-job":
+		s.pipelineStartRestoreJob(w, r, parts[1])
+		return true
+	case r.Method == http.MethodGet && len(parts) == 2 && parts[0] == "restore-jobs":
+		s.pipelineRestoreJobStatus(w, r, parts[1])
+		return true
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "restore-jobs" && parts[2] == "file":
+		s.pipelineRestoreJobFile(w, r, parts[1])
+		return true
 	case r.Method == http.MethodGet && path == "admin/retrieval":
 		writeJSON(w, http.StatusOK, s.pipeline.RetrieverMeta(r.Context()))
 		return true
 	}
 	return false
+}
+
+func (s *Server) pipelineStartRestoreJob(w http.ResponseWriter, r *http.Request, fileID string) {
+	if s.restoreHub == nil {
+		writeError(w, http.StatusServiceUnavailable, "restore hub недоступен")
+		return
+	}
+	job, err := s.restoreHub.Start(fileID)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	go s.pipeline.RunRestoreJob(context.Background(), s.restoreHub, job.ID, fileID)
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) pipelineRestoreJobStatus(w http.ResponseWriter, r *http.Request, id string) {
+	st, ok := s.restoreHub.Get(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "задание не найдено")
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) pipelineRestoreJobFile(w http.ResponseWriter, r *http.Request, id string) {
+	name, data, err := s.restoreHub.TakeResult(id)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", storage.SanitizeName(name)))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) pipelineUpload(w http.ResponseWriter, r *http.Request) {
@@ -105,11 +151,17 @@ func (s *Server) pipelineManualRestore(w http.ResponseWriter, r *http.Request, i
 
 func writePipelineError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, retrieval.ErrCaptcha):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": err.Error(),
+			"code":  "captcha_required",
+			"hint":  "Сторонний сервис запросил проверку; автоматическое восстановление остановлено",
+		})
 	case errors.Is(err, pipeline.ErrNeedManualMP4), errors.Is(err, retrieval.ErrUnavailable):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error":  err.Error(),
-			"code":   "retrieval_unavailable",
-			"hint":   "Импортируйте MP4 вручную: POST /api/drive/{id}/restore",
+			"error": err.Error(),
+			"code":  "retrieval_unavailable",
+			"hint":  "Импортируйте файл вручную или повторите позже",
 		})
 	case errors.Is(err, pipeline.ErrIntegrity):
 		writeError(w, http.StatusConflict, err.Error())

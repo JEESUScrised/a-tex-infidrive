@@ -26,15 +26,16 @@ const version = "1.0.0"
 
 // Server связывает хранилище, очередь и статику.
 type Server struct {
-	store    *storage.Store
-	jobs     *jobs.Manager
-	cfg      config.Config
-	youtube  youtube.VideoStorageProvider
-	drive    *drive.Service
-	pipeline *pipeline.Service
-	web      http.Handler
-	sessions *auth.Manager
-	limiter  *auth.LoginLimiter
+	store      *storage.Store
+	jobs       *jobs.Manager
+	cfg        config.Config
+	youtube    youtube.VideoStorageProvider
+	drive      *drive.Service
+	pipeline   *pipeline.Service
+	restoreHub *pipeline.RestoreHub
+	web        http.Handler
+	sessions   *auth.Manager
+	limiter    *auth.LoginLimiter
 }
 
 // New собирает HTTP-обработчик. Каталог данных не публикуется.
@@ -49,14 +50,15 @@ func NewWithDrive(store *storage.Store, manager *jobs.Manager, cfg config.Config
 		yt = youtube.Unconfigured{}
 	}
 	s := &Server{
-		store:    store,
-		jobs:     manager,
-		cfg:      cfg,
-		youtube:  yt,
-		drive:    driveSvc,
-		pipeline: pipe,
-		web:      spaFileServer(web),
-		limiter:  auth.NewLoginLimiter(10, 15*time.Minute),
+		store:      store,
+		jobs:       manager,
+		cfg:        cfg,
+		youtube:    yt,
+		drive:      driveSvc,
+		pipeline:   pipe,
+		restoreHub: pipeline.NewRestoreHub(),
+		web:        spaFileServer(web),
+		limiter:    auth.NewLoginLimiter(10, 15*time.Minute),
 	}
 	if cfg.AuthEnabled {
 		secret := cfg.SessionSecret

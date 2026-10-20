@@ -128,12 +128,32 @@ func main() {
 			cbox, _ = contentcrypto.NewBox(k)
 			log.Printf("CONTENT_ENCRYPTION_KEY не задан — используется ephemeral dev-ключ")
 		}
-		ret := retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
-		log.Printf("retrieval: %s", ret.Diagnose(context.Background()).Message)
+		var ret retrieval.VideoRetriever
+		workerJS := retrieval.ResolveWorkerJS(cfg.BrowserRetrieverJS)
+		tempDir := cfg.BrowserRetrieverTemp
+		if tempDir == "" {
+			tempDir = cfg.TempPath
+		}
+		if workerJS != "" {
+			pw := retrieval.NewPlaywright(workerJS, tempDir, time.Duration(cfg.BrowserRetrieverTimeoutSec)*time.Second, 64<<20)
+			pw.Headless = cfg.BrowserRetrieverHeadless
+			if err := pw.Available(context.Background()); err != nil {
+				log.Printf("playwright retriever недоступен (%v) — fallback SSYouTube/manual", err)
+				ret = retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+			} else {
+				ret = pw
+				log.Printf("retrieval: playwright worker=%s temp=%s", workerJS, tempDir)
+			}
+		} else {
+			ret = retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+		}
+		if d, ok := ret.(interface{ Diagnose(context.Context) retrieval.Meta }); ok {
+			log.Printf("retrieval: %s", d.Diagnose(context.Background()).Message)
+		}
 		pipe = pipeline.New(driveSvc, driveMeta, yt, ret, cbox, pipeline.Config{
 			MaxBytes:       cfg.ExperimentalMaxBytes,
 			Privacy:        cfg.YouTubePrivacy,
-			TempDir:        cfg.TempPath,
+			TempDir:        tempDir,
 			Encode:         cfg.Encode,
 			WaitProcessing: 2 * time.Minute,
 		})

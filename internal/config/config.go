@@ -74,6 +74,12 @@ type Config struct {
 	ContentEncryptionKey     []byte
 	SSYouTubeAPIURL          string
 	ExperimentalMaxBytes     int64
+
+	// Playwright SSYouTube browser retriever.
+	BrowserRetrieverJS   string // path to browser-retriever/src/cli.mjs
+	BrowserRetrieverTemp string // tmpfs on VPS, e.g. /dev/shm/infidrive
+	BrowserRetrieverTimeoutSec int
+	BrowserRetrieverHeadless   bool
 }
 
 // Load собирает конфигурацию. Уже заданные переменные окружения важнее .env.
@@ -147,6 +153,10 @@ func Load() (Config, error) {
 		YouTubePrivacy:       strings.ToLower(env("YOUTUBE_PRIVACY", "private")),
 		SSYouTubeAPIURL:      firstEnv("SSYOUTUBE_API_URL", ""),
 		ExperimentalMaxBytes: int64(firstEnvInt([]string{"EXPERIMENTAL_MAX_KB"}, 128)) << 10,
+		BrowserRetrieverJS:   firstEnv("BROWSER_RETRIEVER_JS", ""),
+		BrowserRetrieverTemp: firstEnv("BROWSER_RETRIEVER_TEMP", ""),
+		BrowserRetrieverTimeoutSec: firstEnvInt([]string{"BROWSER_RETRIEVER_TIMEOUT_SEC"}, 180),
+		BrowserRetrieverHeadless:   envBool("BROWSER_RETRIEVER_HEADLESS", true),
 	}
 	if ck, err := parseEncryptionKey(firstEnv("CONTENT_ENCRYPTION_KEY", "")); err != nil {
 		return Config{}, fmt.Errorf("CONTENT_ENCRYPTION_KEY: %w", err)
