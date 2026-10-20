@@ -10,16 +10,21 @@ import (
 	"ytdrive/internal/ffmpeg"
 )
 
-func requireFFmpeg(t *testing.T) {
+func requireFFmpeg(t *testing.T) (ffmpeg.Runner, Options) {
 	t.Helper()
-	if err := ffmpeg.New("", "").Available(); err != nil {
+	ff, fp, _ := ffmpeg.Resolve("", "")
+	runner := ffmpeg.New(ff, fp)
+	if err := runner.Available(); err != nil {
 		t.Skip(err.Error())
 	}
+	opt := fastOpt()
+	opt.FFmpeg = ff
+	opt.FFProbe = fp
+	return runner, opt
 }
 
 func TestFFmpegRoundTrip(t *testing.T) {
-	requireFFmpeg(t)
-	opt := fastOpt()
+	_, opt := requireFFmpeg(t)
 	data := []byte("ffmpeg round trip: бинарные \x00\xff данные")
 	in := writeTemp(t, "round.bin", data)
 	outVideo := filepath.Join(t.TempDir(), "video.mp4")
@@ -27,7 +32,7 @@ func TestFFmpegRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := filepath.Join(t.TempDir(), "restored.bin")
-	dec, err := DecodeFile(context.Background(), outVideo, restored, Options{}, nil)
+	dec, err := DecodeFile(context.Background(), outVideo, restored, Options{FFmpeg: opt.FFmpeg, FFProbe: opt.FFProbe}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +49,10 @@ func TestFFmpegRoundTrip(t *testing.T) {
 }
 
 func TestLossyReencode(t *testing.T) {
-	requireFFmpeg(t)
+	runner, base := requireFFmpeg(t)
 	opt := DefaultOptions()
+	opt.FFmpeg = base.FFmpeg
+	opt.FFProbe = base.FFProbe
 	opt.CRF = 14
 	opt.Preset = "veryfast"
 	opt.FPS = 15
@@ -56,7 +63,6 @@ func TestLossyReencode(t *testing.T) {
 	if _, err := EncodeFile(context.Background(), in, src, opt, nil); err != nil {
 		t.Fatal(err)
 	}
-	runner := ffmpeg.New("", "")
 	cases := []struct {
 		name  string
 		crf   int
@@ -73,7 +79,7 @@ func TestLossyReencode(t *testing.T) {
 				t.Fatal(err)
 			}
 			out := filepath.Join(t.TempDir(), "out.bin")
-			if _, err := DecodeFile(context.Background(), re, out, Options{}, nil); err != nil {
+			if _, err := DecodeFile(context.Background(), re, out, Options{FFmpeg: opt.FFmpeg, FFProbe: opt.FFProbe}, nil); err != nil {
 				t.Fatalf("ограничение: повторное сжатие %s не восстановлено: %v", tc.name, err)
 			}
 			got, err := os.ReadFile(out)

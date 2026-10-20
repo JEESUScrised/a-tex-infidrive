@@ -77,3 +77,34 @@ func TestSaveAndJobs(t *testing.T) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
+
+func TestReopenPreservesFiles(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.SaveUpload(bytes.NewReader([]byte("persist")), "keep.txt", "text/plain", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := f.ID
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st2.Close()
+	got, err := st2.GetFile(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OriginalName != "keep.txt" || got.Size != 7 {
+		t.Fatalf("%+v", got)
+	}
+	if _, err := os.Stat(got.StoredPath); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -1,4 +1,5 @@
 /data/
+/data-*/
 /bin/
 /tools/
 /.tools/
