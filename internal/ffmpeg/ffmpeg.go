@@ -5,6 +5,7 @@ package ffmpeg
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -70,6 +71,74 @@ func (r Runner) look(name string) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrNotFound, name)
 	}
 	return path, nil
+}
+
+// MediaInfo — результат ffprobe для скачанного MP4.
+type MediaInfo struct {
+	FormatName string  `json:"format_name"`
+	Duration   float64 `json:"duration_sec"`
+	Width      int     `json:"width"`
+	Height     int     `json:"height"`
+	CodecName  string  `json:"codec_name"`
+	HasVideo   bool    `json:"has_video"`
+}
+
+// ProbeMedia проверяет контейнер, видеодорожку, длительность и разрешение.
+func (r Runner) ProbeMedia(ctx context.Context, path string) (MediaInfo, error) {
+	probe, err := r.look(r.FFProbe)
+	if err != nil {
+		return MediaInfo{}, err
+	}
+	cmd := exec.CommandContext(ctx, probe,
+		"-v", "error",
+		"-show_entries", "format=format_name,duration:stream=codec_type,codec_name,width,height",
+		"-of", "json",
+		path,
+	)
+	hideWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return MediaInfo{}, fmt.Errorf("%w: ffprobe: %v", ErrRun, err)
+	}
+	var raw struct {
+		Format struct {
+			FormatName string `json:"format_name"`
+			Duration   string `json:"duration"`
+		} `json:"format"`
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			CodecName string `json:"codec_name"`
+			Width     int    `json:"width"`
+			Height    int    `json:"height"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return MediaInfo{}, fmt.Errorf("%w: parse ffprobe: %v", ErrRun, err)
+	}
+	info := MediaInfo{FormatName: raw.Format.FormatName}
+	if raw.Format.Duration != "" {
+		if d, err := strconv.ParseFloat(raw.Format.Duration, 64); err == nil {
+			info.Duration = d
+		}
+	}
+	for _, s := range raw.Streams {
+		if s.CodecType == "video" {
+			info.HasVideo = true
+			info.CodecName = s.CodecName
+			info.Width = s.Width
+			info.Height = s.Height
+			break
+		}
+	}
+	if !info.HasVideo || info.Width < 16 || info.Height < 16 {
+		return info, fmt.Errorf("%w: нет читаемой видеодорожки", ErrRun)
+	}
+	if info.FormatName != "" && !strings.Contains(strings.ToLower(info.FormatName), "mp4") &&
+		!strings.Contains(strings.ToLower(info.FormatName), "mov") &&
+		!strings.Contains(strings.ToLower(info.FormatName), "isom") {
+		return info, fmt.Errorf("%w: неожиданный контейнер %s", ErrRun, info.FormatName)
+	}
+	return info, nil
 }
 
 // Probe возвращает размеры первого видеопотока.

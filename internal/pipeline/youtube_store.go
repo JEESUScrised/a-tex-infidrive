@@ -17,6 +17,7 @@ import (
 	"ytdrive/internal/codec"
 	"ytdrive/internal/contentcrypto"
 	"ytdrive/internal/drive"
+	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/retrieval"
 	"ytdrive/internal/storage"
 	"ytdrive/internal/youtube"
@@ -190,7 +191,12 @@ func (s *Service) persistYouTubeFile(folderID, name, mime string, size int64, pl
 
 // RestoreFromStream декодирует MP4 из потока, расшифровывает и проверяет SHA-256
 // ДО сообщения об успехе. Результат только в RAM.
-func (s *Service) RestoreFromStream(ctx context.Context, fileID string, mp4 io.Reader) (name string, data []byte, err error) {
+func (s *Service) RestoreFromStream(ctx context.Context, fileID string, mp4 io.Reader) (string, []byte, error) {
+	return s.RestoreFromStreamProgress(ctx, fileID, mp4, nil)
+}
+
+// RestoreFromStreamProgress — то же с колбэком прогресса.
+func (s *Service) RestoreFromStreamProgress(ctx context.Context, fileID string, mp4 io.Reader, progress retrieval.ProgressFunc) (name string, data []byte, err error) {
 	f, err := s.meta.GetFile(fileID)
 	if err != nil {
 		return "", nil, err
@@ -213,6 +219,17 @@ func (s *Service) RestoreFromStream(ctx context.Context, fileID string, mp4 io.R
 		return "", nil, fmt.Errorf("не удалось принять MP4")
 	}
 
+	if progress != nil {
+		progress("probe", 78, "Восстановление…")
+	}
+	runner := ffmpeg.New(s.cfg.Encode.FFmpeg, s.cfg.Encode.FFProbe)
+	if _, err := runner.ProbeMedia(ctx, mp4Path); err != nil {
+		return "", nil, fmt.Errorf("проверка видео: %w", err)
+	}
+
+	if progress != nil {
+		progress("decode", 85, "Восстановление…")
+	}
 	res, err := codec.DecodeFile(ctx, mp4Path, outPath, codec.Options{FFmpeg: s.cfg.Encode.FFmpeg, FFProbe: s.cfg.Encode.FFProbe}, nil)
 	if err != nil {
 		return "", nil, err
@@ -223,10 +240,16 @@ func (s *Service) RestoreFromStream(ctx context.Context, fileID string, mp4 io.R
 	}
 	plain := payload
 	if s.box != nil {
+		if progress != nil {
+			progress("decrypt", 92, "Восстановление…")
+		}
 		plain, err = s.box.Open(payload)
 		if err != nil {
 			return "", nil, err
 		}
+	}
+	if progress != nil {
+		progress("verify", 96, "Восстановление…")
 	}
 	sum := sha256.Sum256(plain)
 	got := hex.EncodeToString(sum[:])
@@ -241,11 +264,19 @@ func (s *Service) RestoreFromStream(ctx context.Context, fileID string, mp4 io.R
 	if res.Name != "" && name == "" {
 		name = res.Name
 	}
+	if progress != nil {
+		progress("done", 100, "Готово")
+	}
 	return name, plain, nil
 }
 
 // Download восстанавливает файл: auto-retrieve или ошибка с предложением manual.
 func (s *Service) Download(ctx context.Context, fileID string) (string, []byte, error) {
+	return s.DownloadWithProgress(ctx, fileID, nil)
+}
+
+// DownloadWithProgress — Download с прогрессом подготовки/восстановления.
+func (s *Service) DownloadWithProgress(ctx context.Context, fileID string, progress retrieval.ProgressFunc) (string, []byte, error) {
 	if _, err := s.meta.GetFile(fileID); err != nil {
 		return "", nil, err
 	}
@@ -259,16 +290,25 @@ func (s *Service) Download(ctx context.Context, fileID string) (string, []byte, 
 	if err := s.retriever.Available(ctx); err != nil {
 		return "", nil, fmt.Errorf("%w: %v", ErrNeedManualMP4, err)
 	}
+	if progress != nil {
+		progress("retrieve", 25, "Подготовка файла…")
+	}
 	rc, err := s.retriever.Retrieve(ctx, vid)
 	if err != nil {
+		if errors.Is(err, retrieval.ErrCaptcha) {
+			return "", nil, err
+		}
 		return "", nil, fmt.Errorf("%w: %v", ErrNeedManualMP4, err)
 	}
 	defer rc.Close()
-	return s.RestoreFromStream(ctx, fileID, rc)
+	return s.RestoreFromStreamProgress(ctx, fileID, rc, progress)
 }
 
 // RetrieverMeta для admin diagnostics.
 func (s *Service) RetrieverMeta(ctx context.Context) retrieval.Meta {
+	if pw, ok := s.retriever.(*retrieval.Playwright); ok {
+		return pw.Diagnose(ctx)
+	}
 	if ss, ok := s.retriever.(*retrieval.SSYouTube); ok {
 		return ss.Diagnose(ctx)
 	}
