@@ -39,6 +39,12 @@ func NewBox(key []byte) (*Box, error) {
 
 // Seal шифрует plaintext. Формат: magic | nonce | ciphertext+tag.
 func (b *Box) Seal(plain []byte) ([]byte, error) {
+	return b.SealAAD(plain, nil)
+}
+
+// SealAAD — authenticated encryption с дополнительными данными (например file_id|chunk_index).
+// Nonce уникален на каждый вызов (crypto/rand). AAD не шифруется, но привязан к тегу.
+func (b *Box) SealAAD(plain, aad []byte) ([]byte, error) {
 	nonce := make([]byte, b.gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, err
@@ -46,13 +52,17 @@ func (b *Box) Seal(plain []byte) ([]byte, error) {
 	out := make([]byte, 0, len(magic)+len(nonce)+len(plain)+b.gcm.Overhead())
 	out = append(out, magic...)
 	out = append(out, nonce...)
-	out = append(out, b.gcm.Seal(nil, nonce, plain, nil)...)
+	out = append(out, b.gcm.Seal(nil, nonce, plain, aad)...)
 	return out, nil
 }
 
-// Open расшифровывает Seal-пакет. Legacy plaintext без magic возвращает ошибку
-// (в experimental режиме все новые файлы шифруются).
+// Open расшифровывает Seal-пакет без AAD.
 func (b *Box) Open(blob []byte) ([]byte, error) {
+	return b.OpenAAD(blob, nil)
+}
+
+// OpenAAD расшифровывает SealAAD-пакет.
+func (b *Box) OpenAAD(blob, aad []byte) ([]byte, error) {
 	if len(blob) < len(magic)+b.gcm.NonceSize()+b.gcm.Overhead() {
 		return nil, errors.New("слишком короткий ciphertext")
 	}
@@ -61,11 +71,26 @@ func (b *Box) Open(blob []byte) ([]byte, error) {
 	}
 	nonce := blob[len(magic) : len(magic)+b.gcm.NonceSize()]
 	ct := blob[len(magic)+b.gcm.NonceSize():]
-	plain, err := b.gcm.Open(nil, nonce, ct, nil)
+	plain, err := b.gcm.Open(nil, nonce, ct, aad)
 	if err != nil {
 		return nil, fmt.Errorf("расшифровка не удалась: %w", err)
 	}
 	return plain, nil
+}
+
+// ChunkAAD строит стабильный AAD для части файла.
+// chunkTotal намеренно не входит: при потоковой загрузке без Content-Length
+// число частей заранее неизвестно; индекс + длина достаточны для привязки.
+func ChunkAAD(fileID string, chunkIndex, _chunkTotal int, plainLen int64) []byte {
+	var idx [4]byte
+	binary.BigEndian.PutUint32(idx[:], uint32(chunkIndex))
+	var ln [8]byte
+	binary.BigEndian.PutUint64(ln[:], uint64(plainLen))
+	out := make([]byte, 0, len(fileID)+4+8)
+	out = append(out, fileID...)
+	out = append(out, idx[:]...)
+	out = append(out, ln[:]...)
+	return out
 }
 
 // WriteLengthPrefixed — вспомогательная запись размера (для тестов).

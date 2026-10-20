@@ -62,6 +62,11 @@ func (s *Service) CreateFolder(parentID, name string) (Folder, error) {
 	return s.meta.CreateFolder(parentID, name)
 }
 
+// Manifest возвращает admin-диагностику частей файла.
+func (s *Service) Manifest(fileID string) (FileManifest, error) {
+	return s.meta.Manifest(fileID)
+}
+
 // UploadStream пишет байты напрямую во внешнее хранилище (без постоянного файла на VPS).
 func (s *Service) UploadStream(ctx context.Context, folderID, name, mime string, r io.Reader, sizeHint int64) (File, error) {
 	if s.blobs == nil {

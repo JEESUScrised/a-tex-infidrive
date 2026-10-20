@@ -2,6 +2,7 @@ package youtube
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 )
@@ -13,9 +14,10 @@ type FakeProvider struct {
 	uploads     int
 	fail        error
 	lastPath    string
-	lastBytes   []byte // копия MP4 (путь может быть удалён после upload)
+	lastBytes   []byte
 	lastPrivacy string
-	VideoID     string
+	VideoID     string // если задан — фиксированный id (legacy tests)
+	byID        map[string][]byte
 }
 
 func (f *FakeProvider) Configured() bool { return true }
@@ -57,15 +59,21 @@ func (f *FakeProvider) UploadVideo(ctx context.Context, filePath string, opt Upl
 	if f.fail != nil {
 		return VideoRef{}, f.fail
 	}
+	if f.byID == nil {
+		f.byID = map[string][]byte{}
+	}
 	f.uploads++
 	f.lastPath = filePath
+	var body []byte
 	if b, err := os.ReadFile(filePath); err == nil {
-		f.lastBytes = append([]byte(nil), b...)
+		body = append([]byte(nil), b...)
+		f.lastBytes = body
 	}
 	id := f.VideoID
 	if id == "" {
-		id = "video123"
+		id = fmt.Sprintf("video%d", f.uploads)
 	}
+	f.byID[id] = body
 	if opt.Progress != nil {
 		opt.Progress(50, 100)
 		opt.Progress(100, 100)
@@ -84,10 +92,13 @@ func (f *FakeProvider) UploadVideo(ctx context.Context, filePath string, opt Upl
 	}, nil
 }
 
-func (f *FakeProvider) GetVideoStatus(context.Context, string) (VideoRef, error) {
+func (f *FakeProvider) GetVideoStatus(_ context.Context, videoID string) (VideoRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	id := f.VideoID
+	id := videoID
+	if id == "" {
+		id = f.VideoID
+	}
 	if id == "" {
 		id = "video123"
 	}
@@ -117,6 +128,16 @@ func (f *FakeProvider) LastUploadBytes() []byte {
 	defer f.mu.Unlock()
 	out := make([]byte, len(f.lastBytes))
 	copy(out, f.lastBytes)
+	return out
+}
+
+// BytesByID возвращает MP4 по video_id.
+func (f *FakeProvider) BytesByID(id string) []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b := f.byID[id]
+	out := make([]byte, len(b))
+	copy(out, b)
 	return out
 }
 

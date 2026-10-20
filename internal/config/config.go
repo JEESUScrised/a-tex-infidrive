@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"ytdrive/internal/codec"
 	"ytdrive/internal/ffmpeg"
@@ -73,7 +74,12 @@ type Config struct {
 	YouTubePrivacy           string // private|unlisted|public
 	ContentEncryptionKey     []byte
 	SSYouTubeAPIURL          string
-	ExperimentalMaxBytes     int64
+	ExperimentalMaxBytes     int64 // весь файл; алиас лимита загрузки
+	MaxChunkBytes            int64 // одна часть
+	MaxTempBytes             int64 // один временный MP4
+	MaxActiveEncoders        int
+	MaxActiveDecoders        int
+	YouTubeWaitProcessing    time.Duration
 
 	// Playwright SSYouTube browser retriever.
 	BrowserRetrieverJS   string // path to browser-retriever/src/cli.mjs
@@ -152,11 +158,20 @@ func Load() (Config, error) {
 			strings.EqualFold(firstEnv("STORAGE_BACKEND", ""), "youtube"),
 		YouTubePrivacy:       strings.ToLower(env("YOUTUBE_PRIVACY", "private")),
 		SSYouTubeAPIURL:      firstEnv("SSYOUTUBE_API_URL", ""),
-		ExperimentalMaxBytes: int64(firstEnvInt([]string{"EXPERIMENTAL_MAX_KB"}, 128)) << 10,
+		ExperimentalMaxBytes: int64(firstEnvInt([]string{"EXPERIMENTAL_MAX_KB"}, 51200)) << 10, // 50 MiB default
+		MaxChunkBytes:        int64(firstEnvInt([]string{"MAX_CHUNK_MIB", "MAX_CHUNK_MB"}, 5)) << 20,
+		MaxTempBytes:         int64(firstEnvInt([]string{"MAX_TEMP_MIB", "MAX_TEMP_MB"}, 1024)) << 20,
+		MaxActiveEncoders:    firstEnvInt([]string{"MAX_ACTIVE_ENCODERS"}, 1),
+		MaxActiveDecoders:    firstEnvInt([]string{"MAX_ACTIVE_DECODERS"}, 1),
+		YouTubeWaitProcessing: time.Duration(firstEnvInt([]string{"YOUTUBE_WAIT_PROCESSING_SEC"}, 1800)) * time.Second,
 		BrowserRetrieverJS:   firstEnv("BROWSER_RETRIEVER_JS", ""),
 		BrowserRetrieverTemp: firstEnv("BROWSER_RETRIEVER_TEMP", ""),
 		BrowserRetrieverTimeoutSec: firstEnvInt([]string{"BROWSER_RETRIEVER_TIMEOUT_SEC"}, 180),
 		BrowserRetrieverHeadless:   envBool("BROWSER_RETRIEVER_HEADLESS", true),
+	}
+	if v := firstEnvInt([]string{"MAX_UPLOAD_MIB", "MAX_UPLOAD_MB"}, 0); v > 0 {
+		cfg.MaxUpload = int64(v) << 20
+		cfg.ExperimentalMaxBytes = cfg.MaxUpload
 	}
 	if ck, err := parseEncryptionKey(firstEnv("CONTENT_ENCRYPTION_KEY", "")); err != nil {
 		return Config{}, fmt.Errorf("CONTENT_ENCRYPTION_KEY: %w", err)
@@ -196,7 +211,11 @@ func Load() (Config, error) {
 	cfg.AuthEnabled = cfg.AdminUsername != "" && cfg.AdminPasswordHash != ""
 	cfg.CookieSecure = cfg.AppEnv == EnvProduction || strings.HasPrefix(cfg.PublicURL, "https://")
 
-	cfg.Encode = codec.DefaultOptions()
+	if cfg.ExperimentalYouTubeStore {
+		cfg.Encode = codec.DefaultOptionsV2()
+	} else {
+		cfg.Encode = codec.DefaultOptions()
+	}
 	cfg.Encode.FFmpeg = cfg.FFmpeg
 	cfg.Encode.FFProbe = cfg.FFProbe
 	applyEncodeEnv(&cfg)

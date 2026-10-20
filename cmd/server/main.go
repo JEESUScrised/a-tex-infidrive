@@ -152,10 +152,12 @@ func main() {
 		}
 		pipe = pipeline.New(driveSvc, driveMeta, yt, ret, cbox, pipeline.Config{
 			MaxBytes:       cfg.ExperimentalMaxBytes,
+			MaxChunkBytes:  cfg.MaxChunkBytes,
+			MaxTempBytes:   cfg.MaxTempBytes,
 			Privacy:        cfg.YouTubePrivacy,
 			TempDir:        tempDir,
 			Encode:         cfg.Encode,
-			WaitProcessing: 2 * time.Minute,
+			WaitProcessing: cfg.YouTubeWaitProcessing,
 		})
 	}
 

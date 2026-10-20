@@ -19,7 +19,6 @@ import (
 	"ytdrive/internal/drive"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/retrieval"
-	"ytdrive/internal/storage"
 	"ytdrive/internal/youtube"
 )
 
@@ -32,7 +31,9 @@ var (
 
 // Config — лимиты учебного эксперимента.
 type Config struct {
-	MaxBytes       int64
+	MaxBytes       int64 // весь файл (например 50 MiB)
+	MaxChunkBytes  int64 // одна часть (например 5 MiB)
+	MaxTempBytes   int64 // потолок одного временного MP4
 	Privacy        string // private|unlisted|public — default private
 	TempDir        string
 	Encode         codec.Options
@@ -51,90 +52,29 @@ type Service struct {
 
 func New(driveSvc *drive.Service, meta *drive.Store, yt youtube.VideoStorageProvider, ret retrieval.VideoRetriever, box *contentcrypto.Box, cfg Config) *Service {
 	if cfg.MaxBytes <= 0 {
-		cfg.MaxBytes = 128 << 10
+		cfg.MaxBytes = 50 << 20
+	}
+	if cfg.MaxChunkBytes <= 0 {
+		cfg.MaxChunkBytes = 5 << 20
+	}
+	if cfg.MaxTempBytes <= 0 {
+		cfg.MaxTempBytes = 1024 << 20
 	}
 	if cfg.Privacy == "" {
 		cfg.Privacy = "private"
 	}
 	if cfg.WaitProcessing <= 0 {
-		cfg.WaitProcessing = 2 * time.Minute
+		cfg.WaitProcessing = 30 * time.Minute
+	}
+	if cfg.Encode.Width == 0 {
+		cfg.Encode = codec.DefaultOptionsV2()
 	}
 	return &Service{drive: driveSvc, meta: meta, yt: yt, retriever: ret, box: box, cfg: cfg}
 }
 
-// UploadEncryptEncodePublish принимает исходный файл, шифрует, кодирует во временный MP4,
-// загружает на YouTube и удаляет локальные байты. В SQLite остаётся metadata + video_id.
+// UploadEncryptEncodePublish — потоковая многочастная загрузка (codec v2 + chunks).
 func (s *Service) UploadEncryptEncodePublish(ctx context.Context, folderID, name, mime string, r io.Reader, sizeHint int64) (drive.File, error) {
-	if !s.yt.Configured() || !s.yt.Connected(ctx) {
-		return drive.File{}, youtube.ErrNotConnected
-	}
-	if sizeHint > s.cfg.MaxBytes {
-		return drive.File{}, storage.ErrTooLarge
-	}
-	plain, err := io.ReadAll(io.LimitReader(r, s.cfg.MaxBytes+1))
-	if err != nil {
-		return drive.File{}, err
-	}
-	if int64(len(plain)) > s.cfg.MaxBytes {
-		return drive.File{}, storage.ErrTooLarge
-	}
-	plainSHA := sha256.Sum256(plain)
-	plainHex := hex.EncodeToString(plainSHA[:])
-
-	payload := plain
-	if s.box != nil {
-		payload, err = s.box.Seal(plain)
-		if err != nil {
-			return drive.File{}, err
-		}
-	}
-
-	tmpDir, err := os.MkdirTemp(s.cfg.TempDir, "infidrive-exp-*")
-	if err != nil {
-		return drive.File{}, err
-	}
-	defer os.RemoveAll(tmpDir)
-
-	srcPath := filepath.Join(tmpDir, "payload.bin")
-	mp4Path := filepath.Join(tmpDir, "out.mp4")
-	if err := os.WriteFile(srcPath, payload, 0o600); err != nil {
-		return drive.File{}, err
-	}
-
-	opt := s.cfg.Encode
-	opt.DisplayName = storage.SanitizeName(name)
-	encRes, err := codec.EncodeFile(ctx, srcPath, mp4Path, opt, nil)
-	if err != nil {
-		return drive.File{}, err
-	}
-
-	title := strings.TrimSuffix(opt.DisplayName, filepath.Ext(opt.DisplayName))
-	if title == "" {
-		title = "InfiDrive"
-	}
-	ref, err := s.yt.UploadVideo(ctx, mp4Path, youtube.UploadOptions{
-		Title:       title,
-		Description: "A-Tex InfiDrive experimental (encrypted). Do not treat as archive.",
-		Privacy:     s.cfg.Privacy,
-	})
-	if err != nil {
-		return drive.File{}, err
-	}
-
-	// Ждём processing / проверяем статусы — не считаем готовым только по video_id.
-	ref, err = s.waitReady(ctx, ref.VideoID)
-	if err != nil {
-		// video_id уже есть — сохраняем метаданные со статусом processing/error
-		f, metaErr := s.persistYouTubeFile(folderID, name, mime, int64(len(plain)), plainHex, ref, "processing")
-		if metaErr != nil {
-			return drive.File{}, fmt.Errorf("%v; meta: %w", err, metaErr)
-		}
-		f.Status = "processing"
-		return f, err
-	}
-
-	_ = encRes
-	return s.persistYouTubeFile(folderID, name, mime, int64(len(plain)), plainHex, ref, "ready")
+	return s.UploadChunkedStream(ctx, folderID, name, mime, r, sizeHint, nil)
 }
 
 func (s *Service) waitReady(ctx context.Context, videoID string) (youtube.VideoRef, error) {
@@ -213,7 +153,11 @@ func (s *Service) RestoreFromStreamProgress(ctx context.Context, fileID string, 
 	if err != nil {
 		return "", nil, err
 	}
-	n, copyErr := io.Copy(w, io.LimitReader(mp4, 64<<20))
+	limit := s.cfg.MaxTempBytes
+	if limit <= 0 {
+		limit = 1024 << 20
+	}
+	n, copyErr := io.Copy(w, io.LimitReader(mp4, limit))
 	closeErr := w.Close()
 	if copyErr != nil || closeErr != nil || n == 0 {
 		return "", nil, fmt.Errorf("не удалось принять MP4")
@@ -243,7 +187,7 @@ func (s *Service) RestoreFromStreamProgress(ctx context.Context, fileID string, 
 		if progress != nil {
 			progress("decrypt", 92, "Восстановление…")
 		}
-		plain, err = s.box.Open(payload)
+		plain, err = s.openPayload(fileID, payload)
 		if err != nil {
 			return "", nil, err
 		}
@@ -277,8 +221,16 @@ func (s *Service) Download(ctx context.Context, fileID string) (string, []byte, 
 
 // DownloadWithProgress — Download с прогрессом подготовки/восстановления.
 func (s *Service) DownloadWithProgress(ctx context.Context, fileID string, progress retrieval.ProgressFunc) (string, []byte, error) {
-	if _, err := s.meta.GetFile(fileID); err != nil {
+	f, err := s.meta.GetFile(fileID)
+	if err != nil {
 		return "", nil, err
+	}
+	chunks, err := s.meta.ListChunks(fileID)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(chunks) > 0 {
+		return s.downloadChunks(ctx, f, chunks, progress)
 	}
 	vid, _ := s.meta.VideoID(fileID)
 	if vid == "" {
@@ -302,6 +254,105 @@ func (s *Service) DownloadWithProgress(ctx context.Context, fileID string, progr
 	}
 	defer rc.Close()
 	return s.RestoreFromStreamProgress(ctx, fileID, rc, progress)
+}
+
+func (s *Service) downloadChunks(ctx context.Context, f drive.File, chunks []drive.FileChunk, progress retrieval.ProgressFunc) (string, []byte, error) {
+	if s.retriever == nil {
+		return "", nil, ErrNeedManualMP4
+	}
+	if err := s.retriever.Available(ctx); err != nil {
+		return "", nil, fmt.Errorf("%w: %v", ErrNeedManualMP4, err)
+	}
+	out := make([]byte, 0, f.Size)
+	total := len(chunks)
+	for i, ch := range chunks {
+		if ch.YouTubeVideoID == "" {
+			return "", nil, fmt.Errorf("%w: часть %d без video_id", ErrNotReady, ch.ChunkIndex)
+		}
+		if progress != nil {
+			pct := 10 + (i * 80 / total)
+			progress("retrieve", pct, fmt.Sprintf("Часть %d/%d…", i+1, total))
+		}
+		rc, err := s.retriever.Retrieve(ctx, ch.YouTubeVideoID)
+		if err != nil {
+			if errors.Is(err, retrieval.ErrCaptcha) {
+				return "", nil, err
+			}
+			return "", nil, fmt.Errorf("%w: chunk %d: %v", ErrNeedManualMP4, ch.ChunkIndex, err)
+		}
+		plain, err := s.restoreOneChunk(ctx, f.ID, ch, rc)
+		_ = rc.Close()
+		if err != nil {
+			return "", nil, err
+		}
+		sum := sha256.Sum256(plain)
+		got := hex.EncodeToString(sum[:])
+		if ch.ChunkSHA256 != "" && !strings.EqualFold(got, ch.ChunkSHA256) {
+			return "", nil, fmt.Errorf("%w: chunk %d hash", ErrIntegrity, ch.ChunkIndex)
+		}
+		_ = s.meta.SetChunkRecovery(ch.ID, "ok")
+		out = append(out, plain...)
+	}
+	if progress != nil {
+		progress("verify", 96, "Проверка SHA-256…")
+	}
+	sum := sha256.Sum256(out)
+	got := hex.EncodeToString(sum[:])
+	expected := f.SHA256
+	if expected == "" {
+		expected, _ = s.meta.PlainSHA(f.ID)
+	}
+	if expected != "" && !strings.EqualFold(got, expected) {
+		return "", nil, fmt.Errorf("%w: expected %s got %s", ErrIntegrity, expected, got)
+	}
+	if progress != nil {
+		progress("done", 100, "Готово")
+	}
+	return f.Name, out, nil
+}
+
+func (s *Service) restoreOneChunk(ctx context.Context, fileID string, ch drive.FileChunk, mp4 io.Reader) ([]byte, error) {
+	tmpDir, err := os.MkdirTemp(s.cfg.TempDir, "infidrive-rchunk-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmpDir)
+	mp4Path := filepath.Join(tmpDir, "in.mp4")
+	outPath := filepath.Join(tmpDir, "out.bin")
+	w, err := os.OpenFile(mp4Path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	limit := s.cfg.MaxTempBytes
+	if limit <= 0 {
+		limit = 1024 << 20
+	}
+	_, copyErr := io.Copy(w, io.LimitReader(mp4, limit))
+	closeErr := w.Close()
+	if copyErr != nil || closeErr != nil {
+		return nil, fmt.Errorf("не удалось принять MP4 части %d", ch.ChunkIndex)
+	}
+	_, err = codec.DecodeFile(ctx, mp4Path, outPath, codec.Options{FFmpeg: s.cfg.Encode.FFmpeg, FFProbe: s.cfg.Encode.FFProbe}, nil)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := os.ReadFile(outPath)
+	if err != nil {
+		return nil, err
+	}
+	if s.box != nil {
+		aad := contentcrypto.ChunkAAD(fileID, ch.ChunkIndex, ch.ChunkTotal, ch.OriginalSize)
+		plain, err := s.box.OpenAAD(payload, aad)
+		if err != nil {
+			// legacy single-file seal without AAD
+			plain, err = s.box.Open(payload)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return plain, nil
+	}
+	return payload, nil
 }
 
 // RetrieverMeta для admin diagnostics.
@@ -330,6 +381,19 @@ func errString(err error) string {
 		return "ok"
 	}
 	return err.Error()
+}
+
+func (s *Service) openPayload(fileID string, payload []byte) ([]byte, error) {
+	chunks, _ := s.meta.ListChunks(fileID)
+	if len(chunks) >= 1 {
+		ch := chunks[0]
+		aad := contentcrypto.ChunkAAD(fileID, ch.ChunkIndex, ch.ChunkTotal, ch.OriginalSize)
+		if plain, err := s.box.OpenAAD(payload, aad); err == nil {
+			return plain, nil
+		}
+	}
+	// legacy Seal без AAD
+	return s.box.Open(payload)
 }
 
 // BufferReader для тестов.

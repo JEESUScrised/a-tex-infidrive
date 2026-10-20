@@ -78,13 +78,16 @@ CREATE INDEX IF NOT EXISTS idx_share_token ON share_links(token);
 		"youtube_processing_status TEXT NOT NULL DEFAULT ''",
 		"youtube_privacy_status TEXT NOT NULL DEFAULT ''",
 		"plain_sha256 TEXT NOT NULL DEFAULT ''",
+		"chunk_total INTEGER NOT NULL DEFAULT 1",
+		"codec_version INTEGER NOT NULL DEFAULT 1",
+		"manifest_complete INTEGER NOT NULL DEFAULT 0",
 	} {
 		_, err := s.db.Exec(`ALTER TABLE drive_files ADD COLUMN ` + def)
 		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
 			return err
 		}
 	}
-	return nil
+	return s.migrateChunks()
 }
 
 func (s *Store) SetYouTubeMeta(id, videoID, upload, processing, privacy, plainSHA string) error {

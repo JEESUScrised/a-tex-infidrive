@@ -46,8 +46,24 @@ func (s *Server) handlePipeline(w http.ResponseWriter, r *http.Request, path str
 	case r.Method == http.MethodGet && path == "admin/retrieval":
 		writeJSON(w, http.StatusOK, s.pipeline.RetrieverMeta(r.Context()))
 		return true
+	case r.Method == http.MethodGet && len(parts) == 4 && parts[0] == "admin" && parts[1] == "files" && parts[3] == "manifest":
+		s.adminFileManifest(w, r, parts[2])
+		return true
 	}
 	return false
+}
+
+func (s *Server) adminFileManifest(w http.ResponseWriter, _ *http.Request, fileID string) {
+	if s.drive == nil {
+		writeError(w, http.StatusNotFound, "не найдено")
+		return
+	}
+	m, err := s.drive.Manifest(fileID)
+	if err != nil {
+		writeDriveError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
 func (s *Server) pipelineStartRestoreJob(w http.ResponseWriter, r *http.Request, fileID string) {
