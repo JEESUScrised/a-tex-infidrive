@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"ytdrive/internal/ffmpeg"
+	"ytdrive/internal/format"
 	"ytdrive/internal/packets"
 	"ytdrive/internal/video"
 )
@@ -28,6 +29,8 @@ type Options struct {
 	Luma1        byte
 	FFmpeg       string
 	FFProbe      string
+	// FormatVersion — версия контейнера кадра (1 = классика, 2 = плотный профиль).
+	FormatVersion byte
 	// DisplayName попадает в метаданные кадра. Пустое значение — имя входного файла.
 	// Веб-сервер хранит байты под безопасным именем и передаёт сюда исходное имя пользователя.
 	DisplayName string
@@ -63,24 +66,49 @@ type DecodeResult struct {
 	DataPackets      int
 }
 
-// DefaultOptions — устойчивые значения для локального MP4 720p.
+// DefaultOptions — устойчивые значения для локального MP4 720p (YTDrive v1).
 func DefaultOptions() Options {
 	return Options{
-		Width:        1280,
-		Height:       720,
-		Block:        16,
-		FPS:          10,
-		CRF:          16,
-		Preset:       "veryfast",
-		GOP:          1,
-		FrameRepeat:  2,
-		PacketRepeat: 2,
-		ParityGroup:  8,
-		ChunkSize:    360,
-		Luma0:        16,
-		Luma1:        235,
-		FFmpeg:       "ffmpeg",
-		FFProbe:      "ffprobe",
+		Width:         1280,
+		Height:        720,
+		Block:         16,
+		FPS:           10,
+		CRF:           16,
+		Preset:        "veryfast",
+		GOP:           1,
+		FrameRepeat:   2,
+		PacketRepeat:  2,
+		ParityGroup:   8,
+		ChunkSize:     360,
+		Luma0:         16,
+		Luma1:         235,
+		FFmpeg:        "ffmpeg",
+		FFProbe:       "ffprobe",
+		FormatVersion: format.Version,
+	}
+}
+
+// DefaultOptionsV2 — плотный экспериментальный профиль (~1–2 МБ/мин полезных данных).
+// Измерено (crypto/rand): 1 МиБ → ~30 с / ~8.5 МиБ MP4 (CRF 23); 5 МиБ → ~151 с / ~42 МиБ.
+// PacketRepeat=2 чуть снижает плотность, но повышает устойчивость encrypted/high-entropy payload.
+func DefaultOptionsV2() Options {
+	return Options{
+		Width:         1920,
+		Height:        1080,
+		Block:         8,
+		FPS:           10,
+		CRF:           23,
+		Preset:        "veryfast",
+		GOP:           1,
+		FrameRepeat:   1,
+		PacketRepeat:  2,
+		ParityGroup:   8,
+		ChunkSize:     3924, // PayloadCap(1080p/b8)=3960 − packet overhead
+		Luma0:         16,
+		Luma1:         235,
+		FFmpeg:        "ffmpeg",
+		FFProbe:       "ffprobe",
+		FormatVersion: format.Version2,
 	}
 }
 
@@ -129,8 +157,14 @@ func (o *Options) PrepareEncode() error {
 	if o.ParityGroup < 0 || o.ParityGroup > 64 {
 		return fmt.Errorf("parity-group должен быть от 0 до 64")
 	}
-	if o.ChunkSize < 16 || o.ChunkSize > 4096 {
+	if o.ChunkSize < 16 || o.ChunkSize > 16384 {
 		return fmt.Errorf("размер пакета данных %d недопустим", o.ChunkSize)
+	}
+	if o.FormatVersion == 0 {
+		o.FormatVersion = format.Version
+	}
+	if !format.SupportedFrameVersion(o.FormatVersion) {
+		return fmt.Errorf("неподдерживаемая версия формата %d", o.FormatVersion)
 	}
 	if int(o.Luma1) < int(o.Luma0)+32 {
 		return fmt.Errorf("контраст уровней яркости слишком мал")

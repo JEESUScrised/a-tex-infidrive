@@ -6,8 +6,17 @@
 // проект рассчитан на lossless FFV1, а YTDrive v1 должен переживать H.264.
 package format
 
-// Version — единственная реализованная версия контейнера.
+// Version — YTDrive v1 (720p, block 16, высокая избыточность).
 const Version byte = 1
+
+// Version2 — экспериментальный плотный профиль (1080p, block 8, меньше повторов).
+// Раскладка бит/блок та же (PixelLuma1); отличается геометрией и FEC-параметрами в заголовке.
+const Version2 byte = 2
+
+// SupportedFrameVersion — true для версий, которые умеет декодировать текущий бинарник.
+func SupportedFrameVersion(v byte) bool {
+	return v == Version || v == Version2
+}
 
 // Флаги кадра и пакета. Младший бит — gzip полезной нагрузки.
 // Биты 1–3 кодируют режим избыточности и оставлены расширяемыми:

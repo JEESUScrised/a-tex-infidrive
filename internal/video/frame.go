@@ -92,7 +92,7 @@ func parseHeader(b []byte) (FrameHeader, error) {
 		ParityGroup:  binary.BigEndian.Uint16(b[30:]),
 		PacketRepeat: binary.BigEndian.Uint16(b[32:]),
 	}
-	if h.Version != format.Version || (h.PixelMode != format.PixelLuma1 && h.PixelMode != format.PixelDCT) {
+	if !format.SupportedFrameVersion(h.Version) || (h.PixelMode != format.PixelLuma1 && h.PixelMode != format.PixelDCT) {
 		return FrameHeader{}, ErrUnsupported
 	}
 	if h.PixelMode != format.PixelLuma1 {

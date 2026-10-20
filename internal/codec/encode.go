@@ -278,8 +278,12 @@ func (w *frameWriter) flush() error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
+	ver := w.opt.FormatVersion
+	if ver == 0 {
+		ver = format.Version
+	}
 	hdr := video.FrameHeader{
-		Version:      format.Version,
+		Version:      ver,
 		PixelMode:    format.PixelLuma1,
 		Flags:        w.flags,
 		FileID:       w.fileID,
