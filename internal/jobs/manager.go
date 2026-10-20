@@ -33,6 +33,7 @@ type Manager struct {
 	store     *storage.Store
 	opt       codec.Options
 	yt        youtube.VideoStorageProvider
+	ytPrivacy string // default private; experimental public via config
 	queue     chan storage.Job
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -48,6 +49,11 @@ type Manager struct {
 
 // New создаёт менеджер. yt может быть Unconfigured.
 func New(store *storage.Store, opt codec.Options, workers, queueSize int, yt youtube.VideoStorageProvider) *Manager {
+	return NewWithPrivacy(store, opt, workers, queueSize, yt, "private")
+}
+
+// NewWithPrivacy задаёт privacyStatus для YouTube upload (private|unlisted|public).
+func NewWithPrivacy(store *storage.Store, opt codec.Options, workers, queueSize int, yt youtube.VideoStorageProvider, privacy string) *Manager {
 	if workers < 1 {
 		workers = 1
 	}
@@ -57,11 +63,15 @@ func New(store *storage.Store, opt codec.Options, workers, queueSize int, yt you
 	if yt == nil {
 		yt = youtube.Unconfigured{}
 	}
+	if privacy == "" {
+		privacy = "private"
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		store:     store,
 		opt:       opt,
 		yt:        yt,
+		ytPrivacy: privacy,
 		queue:     make(chan storage.Job, queueSize),
 		ctx:       ctx,
 		cancel:    cancel,
@@ -371,10 +381,14 @@ func (m *Manager) runYouTubeUpload(ctx context.Context, job storage.Job) {
 		title = file.OriginalName
 	}
 	last := -1
+	privacy := m.ytPrivacy
+	if privacy == "" {
+		privacy = "private"
+	}
 	opt := youtube.UploadOptions{
 		Title:       title,
-		Description: "Загружено через YTDrive. SHA-256: " + file.SHA256,
-		Privacy:     "private",
+		Description: "Загружено через A-Tex InfiDrive. SHA-256: " + file.SHA256,
+		Privacy:     privacy,
 		Progress: func(sent, total int64) {
 			pct := 0
 			if total > 0 {

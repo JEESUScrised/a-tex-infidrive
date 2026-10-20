@@ -14,11 +14,14 @@ import (
 
 	"ytdrive/internal/blobstore"
 	"ytdrive/internal/config"
+	"ytdrive/internal/contentcrypto"
 	"ytdrive/internal/cryptoutil"
 	"ytdrive/internal/drive"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/httpapi"
 	"ytdrive/internal/jobs"
+	"ytdrive/internal/pipeline"
+	"ytdrive/internal/retrieval"
 	"ytdrive/internal/storage"
 	"ytdrive/internal/youtube"
 )
@@ -46,7 +49,7 @@ func main() {
 	}
 	log.Printf("%s: диагностика FFmpeg: %s", cfg.AppName, ffmpeg.Diagnose(cfg.FFmpeg, cfg.FFProbe))
 	if err := ffmpeg.New(cfg.FFmpeg, cfg.FFProbe).Available(); err != nil {
-		log.Printf("предупреждение: %v — experimental encode будет недоступен", err)
+		log.Printf("предупреждение: %v", err)
 	}
 
 	store, err := storage.OpenPaths(storage.Paths{
@@ -65,26 +68,26 @@ func main() {
 			log.Fatalf("шифрование токенов: %v", err)
 		}
 		store.SetTokenBox(box)
-		log.Printf("OAuth-токены: шифрование at rest включено")
 	}
 
-	blobs, err := blobstore.NewFromConfig(blobstore.Config{
-		Provider:          cfg.BlobProvider,
-		S3Endpoint:        cfg.S3Endpoint,
-		S3Region:          cfg.S3Region,
-		S3Bucket:          cfg.S3Bucket,
-		S3AccessKeyID:     cfg.S3AccessKeyID,
-		S3SecretAccessKey: cfg.S3SecretAccessKey,
-		S3ForcePathStyle:  cfg.S3ForcePathStyle,
-		S3Prefix:          cfg.S3Prefix,
-	})
-	if err != nil {
-		log.Fatalf("blobstore: %v", err)
-	}
-	if cfg.BlobProvider == "memory" {
-		log.Printf("STORAGE_PROVIDER=memory — только для development; пользовательские файлы в RAM процесса")
+	var blobs blobstore.StorageProvider
+	if !cfg.ExperimentalYouTubeStore {
+		blobs, err = blobstore.NewFromConfig(blobstore.Config{
+			Provider:          cfg.BlobProvider,
+			S3Endpoint:        cfg.S3Endpoint,
+			S3Region:          cfg.S3Region,
+			S3Bucket:          cfg.S3Bucket,
+			S3AccessKeyID:     cfg.S3AccessKeyID,
+			S3SecretAccessKey: cfg.S3SecretAccessKey,
+			S3ForcePathStyle:  cfg.S3ForcePathStyle,
+			S3Prefix:          cfg.S3Prefix,
+		})
+		if err != nil {
+			log.Fatalf("blobstore: %v", err)
+		}
+		log.Printf("STORAGE_PROVIDER=%s", cfg.BlobProvider)
 	} else {
-		log.Printf("STORAGE_PROVIDER=%s bucket=%s", cfg.BlobProvider, cfg.S3Bucket)
+		log.Printf("EXPERIMENTAL_YOUTUBE_STORE: пользовательские байты только через YouTube+temp; privacy=%s", cfg.YouTubePrivacy)
 	}
 
 	driveMeta, err := drive.Open(store.DB())
@@ -92,12 +95,6 @@ func main() {
 		log.Fatalf("drive meta: %v", err)
 	}
 	driveSvc := drive.NewService(driveMeta, blobs, cfg.PublicURL, cfg.MaxUpload)
-
-	if cfg.AuthEnabled {
-		log.Printf("режим доступа: single-admin (%s)", cfg.AdminUsername)
-	} else {
-		log.Printf("режим доступа: открытый API (только для development)")
-	}
 
 	var yt youtube.VideoStorageProvider = youtube.Unconfigured{}
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
@@ -107,20 +104,52 @@ func main() {
 			RedirectURL:  cfg.GoogleRedirectURL,
 		}, store)
 		if err != nil {
-			log.Printf("YouTube experimental: %v", err)
+			log.Printf("YouTube: %v", err)
 		} else {
 			yt = svc
-			log.Printf("YouTube experimental: OAuth настроен (не в пользовательском UI)")
+			log.Printf("YouTube OAuth настроен, redirect=%s", cfg.GoogleRedirectURL)
 		}
 	}
 
-	manager := jobs.New(store, cfg.Encode, cfg.Workers, cfg.QueueSize, yt)
+	var pipe *pipeline.Service
+	if cfg.ExperimentalYouTubeStore {
+		var cbox *contentcrypto.Box
+		if len(cfg.ContentEncryptionKey) == 32 {
+			cbox, err = contentcrypto.NewBox(cfg.ContentEncryptionKey)
+			if err != nil {
+				log.Fatalf("content crypto: %v", err)
+			}
+		} else if cfg.AppEnv == config.EnvProduction {
+			log.Fatal("CONTENT_ENCRYPTION_KEY обязателен")
+		} else {
+			// development: ephemeral key
+			k := make([]byte, 32)
+			copy(k, []byte("dev-content-key-not-for-prod!!!!"))
+			cbox, _ = contentcrypto.NewBox(k)
+			log.Printf("CONTENT_ENCRYPTION_KEY не задан — используется ephemeral dev-ключ")
+		}
+		ret := retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+		log.Printf("retrieval: %s", ret.Diagnose(context.Background()).Message)
+		pipe = pipeline.New(driveSvc, driveMeta, yt, ret, cbox, pipeline.Config{
+			MaxBytes:       cfg.ExperimentalMaxBytes,
+			Privacy:        cfg.YouTubePrivacy,
+			TempDir:        cfg.TempPath,
+			Encode:         cfg.Encode,
+			WaitProcessing: 2 * time.Minute,
+		})
+	}
+
+	manager := jobs.NewWithPrivacy(store, cfg.Encode, cfg.Workers, cfg.QueueSize, yt, cfg.YouTubePrivacy)
 	manager.Start()
 	defer manager.Stop()
 
+	if cfg.AuthEnabled {
+		log.Printf("режим доступа: single-admin (%s)", cfg.AdminUsername)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.NewWithDrive(store, manager, cfg, yt, driveSvc).Handler(),
+		Handler:           httpapi.NewWithDrive(store, manager, cfg, yt, driveSvc, pipe).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)

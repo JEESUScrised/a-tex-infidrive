@@ -67,6 +67,13 @@ type Config struct {
 	S3SecretAccessKey  string
 	S3ForcePathStyle   bool
 	S3Prefix           string
+
+	// Experimental YouTube end-to-end (college demo).
+	ExperimentalYouTubeStore bool
+	YouTubePrivacy           string // private|unlisted|public
+	ContentEncryptionKey     []byte
+	SSYouTubeAPIURL          string
+	ExperimentalMaxBytes     int64
 }
 
 // Load собирает конфигурацию. Уже заданные переменные окружения важнее .env.
@@ -135,13 +142,31 @@ func Load() (Config, error) {
 		S3SecretAccessKey:  firstEnv("S3_SECRET_ACCESS_KEY", ""),
 		S3ForcePathStyle:   envBool("S3_FORCE_PATH_STYLE", true),
 		S3Prefix:           firstEnv("S3_PREFIX", "infidrive"),
+		ExperimentalYouTubeStore: envBool("EXPERIMENTAL_YOUTUBE_STORE", false) ||
+			strings.EqualFold(firstEnv("STORAGE_BACKEND", ""), "youtube"),
+		YouTubePrivacy:       strings.ToLower(env("YOUTUBE_PRIVACY", "private")),
+		SSYouTubeAPIURL:      firstEnv("SSYOUTUBE_API_URL", ""),
+		ExperimentalMaxBytes: int64(firstEnvInt([]string{"EXPERIMENTAL_MAX_KB"}, 128)) << 10,
+	}
+	if ck, err := parseEncryptionKey(firstEnv("CONTENT_ENCRYPTION_KEY", "")); err != nil {
+		return Config{}, fmt.Errorf("CONTENT_ENCRYPTION_KEY: %w", err)
+	} else {
+		cfg.ContentEncryptionKey = ck
+	}
+	if cfg.YouTubePrivacy == "" {
+		cfg.YouTubePrivacy = "private"
 	}
 	if cfg.BlobProvider == "" {
-		if cfg.S3Bucket != "" && cfg.S3AccessKeyID != "" {
+		if cfg.ExperimentalYouTubeStore {
+			cfg.BlobProvider = "none"
+		} else if cfg.S3Bucket != "" && cfg.S3AccessKeyID != "" {
 			cfg.BlobProvider = "s3"
 		} else {
 			cfg.BlobProvider = "memory"
 		}
+	}
+	if cfg.ExperimentalYouTubeStore && cfg.MaxUpload > cfg.ExperimentalMaxBytes {
+		cfg.MaxUpload = cfg.ExperimentalMaxBytes
 	}
 
 	// Опционально: хеш из plaintext только вне production (удобство разработки).
@@ -209,11 +234,20 @@ func (c Config) Validate() error {
 	if c.PublicURL == "" || !strings.HasPrefix(c.PublicURL, "https://") {
 		errs = append(errs, "PUBLIC_URL должен быть https://…")
 	}
-	if c.BlobProvider != "s3" {
-		errs = append(errs, "в production STORAGE_PROVIDER должен быть s3 (memory запрещён)")
-	}
-	if c.S3Bucket == "" || c.S3AccessKeyID == "" || c.S3SecretAccessKey == "" {
-		errs = append(errs, "нужны S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY")
+	if c.ExperimentalYouTubeStore {
+		if len(c.ContentEncryptionKey) != 32 {
+			errs = append(errs, "CONTENT_ENCRYPTION_KEY (32 байта) обязателен для experimental YouTube store")
+		}
+		if c.YouTubePrivacy == "public" {
+			// допустимо для учебного demo, но фиксируем в логах на старте
+		}
+	} else {
+		if c.BlobProvider != "s3" {
+			errs = append(errs, "в production STORAGE_PROVIDER должен быть s3 (memory запрещён)")
+		}
+		if c.S3Bucket == "" || c.S3AccessKeyID == "" || c.S3SecretAccessKey == "" {
+			errs = append(errs, "нужны S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY")
+		}
 	}
 	if c.GoogleRedirectURL != "" && strings.HasPrefix(c.GoogleRedirectURL, "http://") && !strings.Contains(c.GoogleRedirectURL, "localhost") {
 		errs = append(errs, "GOOGLE_REDIRECT_URL в production должен использовать HTTPS")

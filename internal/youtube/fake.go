@@ -2,17 +2,20 @@ package youtube
 
 import (
 	"context"
+	"os"
 	"sync"
 )
 
 // FakeProvider — тестовый провайдер без сети.
 type FakeProvider struct {
-	mu        sync.Mutex
-	connected bool
-	uploads   int
-	fail      error
-	lastPath  string
-	VideoID   string
+	mu          sync.Mutex
+	connected   bool
+	uploads     int
+	fail        error
+	lastPath    string
+	lastBytes   []byte // копия MP4 (путь может быть удалён после upload)
+	lastPrivacy string
+	VideoID     string
 }
 
 func (f *FakeProvider) Configured() bool { return true }
@@ -56,6 +59,9 @@ func (f *FakeProvider) UploadVideo(ctx context.Context, filePath string, opt Upl
 	}
 	f.uploads++
 	f.lastPath = filePath
+	if b, err := os.ReadFile(filePath); err == nil {
+		f.lastBytes = append([]byte(nil), b...)
+	}
 	id := f.VideoID
 	if id == "" {
 		id = "video123"
@@ -64,27 +70,54 @@ func (f *FakeProvider) UploadVideo(ctx context.Context, filePath string, opt Upl
 		opt.Progress(50, 100)
 		opt.Progress(100, 100)
 	}
+	priv := opt.Privacy
+	if priv == "" {
+		priv = "private"
+	}
+	f.lastPrivacy = priv
 	return VideoRef{
 		VideoID:          id,
 		URL:              "https://www.youtube.com/watch?v=" + id,
 		UploadStatus:     "uploaded",
 		ProcessingStatus: "processing",
-		PrivacyStatus:    "private",
+		PrivacyStatus:    priv,
 	}, nil
 }
 
 func (f *FakeProvider) GetVideoStatus(context.Context, string) (VideoRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	id := f.VideoID
 	if id == "" {
 		id = "video123"
+	}
+	priv := f.lastPrivacy
+	if priv == "" {
+		priv = "private"
 	}
 	return VideoRef{
 		VideoID:          id,
 		URL:              "https://www.youtube.com/watch?v=" + id,
 		UploadStatus:     "processed",
 		ProcessingStatus: "succeeded",
-		PrivacyStatus:    "private",
+		PrivacyStatus:    priv,
 	}, nil
+}
+
+// LastUploadPath — путь к MP4 последней загрузки (может быть уже удалён).
+func (f *FakeProvider) LastUploadPath() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastPath
+}
+
+// LastUploadBytes — копия загруженного MP4 для тестов восстановления.
+func (f *FakeProvider) LastUploadBytes() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]byte, len(f.lastBytes))
+	copy(out, f.lastBytes)
+	return out
 }
 
 func (f *FakeProvider) Upload(ctx context.Context, path, title, desc string) (VideoRef, error) {
