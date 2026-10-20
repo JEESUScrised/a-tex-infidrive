@@ -1,0 +1,12 @@
+/data/
+/bin/
+/tools/
+/.tools/
+*.exe
+*.mp4
+*.partial
+*.partial.mp4
+.env
+.DS_Store
+*.db
+*.db-journal
