@@ -19,7 +19,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/infidrive /var/log/infidrive
+ReadWritePaths=/var/lib/infidrive /var/log/infidrive /dev/shm/infidrive
+# Playwright/Chromium: ограниченная RAM на 6 GiB VPS
+MemoryMax=3G
+TasksMax=512
 UMask=0077
 
 StandardOutput=journal

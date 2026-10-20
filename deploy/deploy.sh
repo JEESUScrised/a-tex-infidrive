@@ -47,6 +47,14 @@ if [[ -d "$SRC_DIR/site" ]]; then
   rsync -a --delete "$SRC_DIR/site/" "$SITE_ROOT/"
 fi
 
+if [[ -d "$SRC_DIR/browser-retriever" ]]; then
+  echo "==> browser-retriever"
+  rsync -a --delete \
+    --exclude node_modules --exclude tmp-out \
+    "$SRC_DIR/browser-retriever/" "$OPT_ROOT/browser-retriever/"
+  chown -R infidrive:infidrive "$OPT_ROOT/browser-retriever"
+fi
+
 echo "==> Бэкап данных перед переключением"
 BACKUP_DIR="$VAR_ROOT/backups/$RELEASE_ID"
 install -d -o infidrive -g infidrive "$BACKUP_DIR"
