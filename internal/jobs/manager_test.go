@@ -16,7 +16,7 @@ import (
 func TestQueueRejectsDuplicateAndOverflow(t *testing.T) {
 	st := openStore(t)
 	opt := codec.DefaultOptions()
-	m := New(st, opt, 1, 1)
+	m := New(st, opt, 1, 1, nil)
 	defer m.Stop()
 
 	a := save(t, st, "a.txt", []byte("a"))
@@ -44,7 +44,7 @@ func TestEncodeJobFinishes(t *testing.T) {
 	opt.CRF = 20
 	opt.FPS = 15
 	opt.GOP = 1
-	m := New(st, opt, 1, 2)
+	m := New(st, opt, 1, 2, nil)
 	m.Start()
 	defer m.Stop()
 
@@ -86,7 +86,7 @@ func TestEncodeJobFinishes(t *testing.T) {
 func TestCancelQueuedJob(t *testing.T) {
 	st := openStore(t)
 	opt := codec.DefaultOptions()
-	m := New(st, opt, 1, 4)
+	m := New(st, opt, 1, 4, nil)
 	defer m.Stop()
 
 	f := save(t, st, "cancel.txt", []byte("cancel-me"))
@@ -120,7 +120,7 @@ func TestMissingFFmpegFailsJob(t *testing.T) {
 	opt.FFProbe = filepath.Join(t.TempDir(), "missing-ffprobe")
 	opt.FrameRepeat = 1
 	opt.PacketRepeat = 1
-	m := New(st, opt, 1, 2)
+	m := New(st, opt, 1, 2, nil)
 	m.Start()
 	defer m.Stop()
 

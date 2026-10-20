@@ -11,18 +11,22 @@ import (
 	"ytdrive/internal/ffmpeg"
 )
 
-// Config — параметры сервера. Секретов здесь нет: YouTube OAuth в этой версии не используется.
+// Config — параметры сервера.
+// Секреты Google читаются только из окружения / .env и не коммитятся.
 type Config struct {
-	Addr         string
-	DataDir      string
-	WebDir       string
-	MaxUpload    int64
-	Workers      int
-	QueueSize    int
-	FFmpeg       string
-	FFProbe      string
-	FFmpegSource string
-	Encode       codec.Options
+	Addr               string
+	DataDir            string
+	WebDir             string
+	MaxUpload          int64
+	Workers            int
+	QueueSize          int
+	FFmpeg             string
+	FFProbe            string
+	FFmpegSource       string
+	Encode             codec.Options
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
 }
 
 // Load собирает конфигурацию. Уже заданные переменные окружения важнее .env.
@@ -33,15 +37,18 @@ func Load() Config {
 	ff, fp, src := ffmpeg.Resolve(ffHint, fpHint)
 
 	cfg := Config{
-		Addr:         env("YTDRIVE_ADDR", ":8080"),
-		DataDir:      env("YTDRIVE_DATA_DIR", "data"),
-		WebDir:       env("YTDRIVE_WEB_DIR", ""),
-		MaxUpload:    int64(envInt("YTDRIVE_MAX_UPLOAD_MB", 64)) << 20,
-		Workers:      envInt("YTDRIVE_WORKERS", 1),
-		QueueSize:    envInt("YTDRIVE_QUEUE", 16),
-		FFmpeg:       ff,
-		FFProbe:      fp,
-		FFmpegSource: src,
+		Addr:               env("YTDRIVE_ADDR", ":8080"),
+		DataDir:            env("YTDRIVE_DATA_DIR", "data"),
+		WebDir:             env("YTDRIVE_WEB_DIR", ""),
+		MaxUpload:          int64(envInt("YTDRIVE_MAX_UPLOAD_MB", 64)) << 20,
+		Workers:            envInt("YTDRIVE_WORKERS", 1),
+		QueueSize:          envInt("YTDRIVE_QUEUE", 16),
+		FFmpeg:             ff,
+		FFProbe:            fp,
+		FFmpegSource:       src,
+		GoogleClientID:     env("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: env("GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:  env("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/youtube/callback"),
 	}
 	cfg.Encode = codec.DefaultOptions()
 	cfg.Encode.FFmpeg = cfg.FFmpeg

@@ -1,5 +1,4 @@
-// Package jobs выполняет кодирование и восстановление в ограниченном пуле воркеров.
-// Число одновременных процессов FFmpeg равно числу воркеров.
+// Package jobs выполняет кодирование, восстановление и загрузку на YouTube в пуле воркеров.
 package jobs
 
 import (
@@ -13,6 +12,7 @@ import (
 
 	"ytdrive/internal/codec"
 	"ytdrive/internal/storage"
+	"ytdrive/internal/youtube"
 )
 
 var (
@@ -24,12 +24,15 @@ var (
 	ErrStopped = errors.New("сервер останавливается")
 	// ErrNotCancellable — задание уже завершено или неизвестно.
 	ErrNotCancellable = errors.New("задание нельзя отменить")
+	// ErrNoVideo — нет локального MP4 для загрузки.
+	ErrNoVideo = errors.New("сначала закодируйте файл в MP4")
 )
 
 // Manager — очередь заданий и пул воркеров.
 type Manager struct {
 	store     *storage.Store
 	opt       codec.Options
+	yt        youtube.VideoStorageProvider
 	queue     chan storage.Job
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -43,18 +46,22 @@ type Manager struct {
 	stopOnce  sync.Once
 }
 
-// New создаёт менеджер. Start запускает воркеры, Stop дожидается текущих задач.
-func New(store *storage.Store, opt codec.Options, workers, queueSize int) *Manager {
+// New создаёт менеджер. yt может быть Unconfigured.
+func New(store *storage.Store, opt codec.Options, workers, queueSize int, yt youtube.VideoStorageProvider) *Manager {
 	if workers < 1 {
 		workers = 1
 	}
 	if queueSize < 1 {
 		queueSize = 1
 	}
+	if yt == nil {
+		yt = youtube.Unconfigured{}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		store:     store,
 		opt:       opt,
+		yt:        yt,
 		queue:     make(chan storage.Job, queueSize),
 		ctx:       ctx,
 		cancel:    cancel,
@@ -65,9 +72,10 @@ func New(store *storage.Store, opt codec.Options, workers, queueSize int) *Manag
 	}
 }
 
-// Start поднимает воркеры. Повторный вызов ничего не делает.
+// Start поднимает воркеры и помечает прерванные задания.
 func (m *Manager) Start() {
 	m.startOnce.Do(func() {
+		_, _ = m.store.FailInterruptedJobs()
 		for i := 0; i < m.workers; i++ {
 			m.wg.Add(1)
 			go m.loop()
@@ -102,7 +110,7 @@ func (m *Manager) Cancel(jobID string) error {
 		return err
 	}
 	switch job.Status {
-	case storage.StatusSucceeded, storage.StatusFailed, storage.StatusCancelled:
+	case storage.StatusSucceeded, storage.StatusFailed, storage.StatusCancelled, storage.StatusCompleted:
 		return ErrNotCancellable
 	}
 	m.mu.Lock()
@@ -128,6 +136,40 @@ func (m *Manager) EnqueueEncode(fileID string) (storage.Job, error) {
 		return storage.Job{}, err
 	}
 	job, err := m.store.CreateJob(storage.KindEncode, f.ID, f.StoredPath)
+	if err != nil {
+		m.clear(fileID)
+		return storage.Job{}, err
+	}
+	if err := m.push(job); err != nil {
+		m.clear(fileID)
+		_ = m.store.UpdateJob(job.ID, storage.StatusFailed, 0, "", err.Error())
+		return storage.Job{}, err
+	}
+	return job, nil
+}
+
+// EnqueueYouTubeUpload ставит загрузку готового MP4 на YouTube.
+func (m *Manager) EnqueueYouTubeUpload(fileID string) (storage.Job, error) {
+	if !m.yt.Configured() {
+		return storage.Job{}, youtube.ErrNotConfigured
+	}
+	if !m.yt.Connected(m.ctx) {
+		return storage.Job{}, youtube.ErrNotConnected
+	}
+	f, err := m.store.GetFile(fileID)
+	if err != nil {
+		return storage.Job{}, err
+	}
+	if f.VideoPath == "" {
+		return storage.Job{}, ErrNoVideo
+	}
+	if f.YouTubeVideoID != "" {
+		return storage.Job{}, youtube.ErrAlreadyUploaded
+	}
+	if err := m.reserve(fileID); err != nil {
+		return storage.Job{}, err
+	}
+	job, err := m.store.CreateJob(storage.KindYouTubeUpload, f.ID, f.VideoPath)
 	if err != nil {
 		m.clear(fileID)
 		return storage.Job{}, err
@@ -208,7 +250,7 @@ func (m *Manager) loop() {
 
 func (m *Manager) process(job storage.Job) {
 	defer func() {
-		if job.Kind == storage.KindEncode {
+		if job.Kind == storage.KindEncode || job.Kind == storage.KindYouTubeUpload {
 			m.clear(job.FileID)
 		}
 		m.mu.Lock()
@@ -234,7 +276,27 @@ func (m *Manager) process(job storage.Job) {
 	m.mu.Unlock()
 	defer cancel()
 
-	_ = m.store.UpdateJob(job.ID, storage.StatusRunning, 0, "выполняется", "")
+	switch job.Kind {
+	case storage.KindEncode:
+		_ = m.store.UpdateJob(job.ID, storage.StatusRunning, 0, "кодирование", "")
+		m.runEncode(jobCtx, job)
+	case storage.KindDecode:
+		_ = m.store.UpdateJob(job.ID, storage.StatusRunning, 0, "восстановление", "")
+		m.runDecode(jobCtx, job)
+	case storage.KindYouTubeUpload:
+		_ = m.store.UpdateJob(job.ID, storage.StatusUploading, 0, "загрузка на YouTube", "")
+		m.runYouTubeUpload(jobCtx, job)
+	default:
+		_ = m.store.UpdateJob(job.ID, storage.StatusFailed, 0, "", "неизвестный тип задания")
+	}
+}
+
+func (m *Manager) runEncode(ctx context.Context, job storage.Job) {
+	out := filepath.Join(m.store.Root(), "objects", job.FileID, "video.mp4")
+	opt := m.opt
+	if file, err := m.store.GetFile(job.FileID); err == nil && file.OriginalName != "" {
+		opt.DisplayName = file.OriginalName
+	}
 	last := -1
 	progress := func(done, total int) {
 		pct := 0
@@ -246,22 +308,6 @@ func (m *Manager) process(job storage.Job) {
 		}
 		last = pct
 		_ = m.store.UpdateJob(job.ID, storage.StatusRunning, pct, fmt.Sprintf("кадры %d из %d", done, total), "")
-	}
-	switch job.Kind {
-	case storage.KindEncode:
-		m.runEncode(jobCtx, job, progress)
-	case storage.KindDecode:
-		m.runDecode(jobCtx, job, progress)
-	default:
-		_ = m.store.UpdateJob(job.ID, storage.StatusFailed, 0, "", "неизвестный тип задания")
-	}
-}
-
-func (m *Manager) runEncode(ctx context.Context, job storage.Job, progress codec.ProgressFunc) {
-	out := filepath.Join(m.store.Root(), "objects", job.FileID, "video.mp4")
-	opt := m.opt
-	if file, err := m.store.GetFile(job.FileID); err == nil && file.OriginalName != "" {
-		opt.DisplayName = file.OriginalName
 	}
 	res, err := codec.EncodeFile(ctx, job.InputPath, out, opt, progress)
 	if err != nil {
@@ -278,8 +324,20 @@ func (m *Manager) runEncode(ctx context.Context, job storage.Job, progress codec
 	_ = m.store.UpdateJob(job.ID, storage.StatusSucceeded, 100, fmt.Sprintf("готово, кадров: %d, sha256 %s", res.Frames, res.SHA256Hex), "")
 }
 
-func (m *Manager) runDecode(ctx context.Context, job storage.Job, progress codec.ProgressFunc) {
+func (m *Manager) runDecode(ctx context.Context, job storage.Job) {
 	out := filepath.Join(filepath.Dir(job.InputPath), "restored")
+	last := -1
+	progress := func(done, total int) {
+		pct := 0
+		if total > 0 {
+			pct = done * 100 / total
+		}
+		if pct < 100 && pct == last {
+			return
+		}
+		last = pct
+		_ = m.store.UpdateJob(job.ID, storage.StatusRunning, pct, fmt.Sprintf("кадры %d из %d", done, total), "")
+	}
 	res, err := codec.DecodeFile(ctx, job.InputPath, out, codec.Options{FFmpeg: m.opt.FFmpeg, FFProbe: m.opt.FFProbe}, progress)
 	if err != nil {
 		_ = os.Remove(out)
@@ -294,11 +352,121 @@ func (m *Manager) runDecode(ctx context.Context, job storage.Job, progress codec
 	_ = m.store.UpdateJob(job.ID, storage.StatusSucceeded, 100, fmt.Sprintf("восстановлен %s, sha256 %s", res.Name, res.SHA256Hex), "")
 }
 
+func (m *Manager) runYouTubeUpload(ctx context.Context, job storage.Job) {
+	file, err := m.store.GetFile(job.FileID)
+	if err != nil {
+		_ = m.store.UpdateJob(job.ID, storage.StatusFailed, 0, "", err.Error())
+		return
+	}
+	if file.YouTubeVideoID != "" {
+		_ = m.store.UpdateJob(job.ID, storage.StatusFailed, 0, "", youtube.ErrAlreadyUploaded.Error())
+		return
+	}
+	path := job.InputPath
+	if path == "" {
+		path = file.VideoPath
+	}
+	title := strings.TrimSuffix(file.OriginalName, filepath.Ext(file.OriginalName))
+	if title == "" {
+		title = file.OriginalName
+	}
+	last := -1
+	opt := youtube.UploadOptions{
+		Title:       title,
+		Description: "Загружено через YTDrive. SHA-256: " + file.SHA256,
+		Privacy:     "private",
+		Progress: func(sent, total int64) {
+			pct := 0
+			if total > 0 {
+				pct = int(sent * 100 / total)
+			}
+			if pct > 99 {
+				pct = 99
+			}
+			if pct == last {
+				return
+			}
+			last = pct
+			_ = m.store.UpdateJob(job.ID, storage.StatusUploading, pct, fmt.Sprintf("загрузка %d%%", pct), "")
+		},
+	}
+	ref, err := m.yt.UploadVideo(ctx, path, opt)
+	if err != nil {
+		_ = m.store.SetYouTube(job.FileID, storage.YouTubeMeta{
+			UploadStatus: storage.StatusFailed,
+			Error:        publicYouTubeErr(err),
+		})
+		status, msg := failStatus(ctx, err)
+		_ = m.store.UpdateJob(job.ID, status, 0, "", msg)
+		return
+	}
+	// Сразу фиксируем video_id, чтобы повторная публикация была невозможна.
+	meta := storage.YouTubeMeta{
+		VideoID:          ref.VideoID,
+		URL:              ref.URL,
+		UploadStatus:     storage.StatusUploaded,
+		ProcessingStatus: ref.ProcessingStatus,
+		UploadedAt:       storage.NowUTC(),
+		PrivacyStatus:    ref.PrivacyStatus,
+	}
+	if meta.ProcessingStatus == "" {
+		meta.ProcessingStatus = "uploaded"
+	}
+	_ = m.store.SetYouTube(job.FileID, meta)
+	_ = m.store.UpdateJob(job.ID, storage.StatusUploaded, 100, "загружено, ожидание обработки", "")
+
+	_ = m.store.UpdateJob(job.ID, storage.StatusProcessing, 100, "проверка статуса обработки", "")
+	st, err := m.yt.GetVideoStatus(ctx, ref.VideoID)
+	if err == nil {
+		meta.UploadStatus = st.UploadStatus
+		if meta.UploadStatus == "" {
+			meta.UploadStatus = storage.StatusUploaded
+		}
+		meta.ProcessingStatus = st.ProcessingStatus
+		if st.PrivacyStatus != "" {
+			meta.PrivacyStatus = st.PrivacyStatus
+		}
+		_ = m.store.SetYouTube(job.FileID, meta)
+	}
+	_ = m.store.UpdateJob(job.ID, storage.StatusCompleted, 100,
+		fmt.Sprintf("YouTube %s (%s)", ref.VideoID, meta.PrivacyStatus), "")
+}
+
 func failStatus(ctx context.Context, err error) (string, string) {
 	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 		return storage.StatusCancelled, "отменено"
 	}
-	return storage.StatusFailed, err.Error()
+	return storage.StatusFailed, publicYouTubeErr(err)
+}
+
+func publicYouTubeErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, youtube.ErrNotConfigured):
+		return youtube.ErrNotConfigured.Error()
+	case errors.Is(err, youtube.ErrNotConnected):
+		return youtube.ErrNotConnected.Error()
+	case errors.Is(err, youtube.ErrQuota):
+		return "квота YouTube API исчерпана или ограничена"
+	case errors.Is(err, youtube.ErrAuth):
+		return "ошибка авторизации YouTube — подключите аккаунт снова"
+	case errors.Is(err, youtube.ErrAlreadyUploaded):
+		return youtube.ErrAlreadyUploaded.Error()
+	case errors.Is(err, youtube.ErrTemporary):
+		return "временная ошибка YouTube API"
+	default:
+		// Не пробрасываем сырой ответ с возможными токенами.
+		msg := err.Error()
+		if strings.Contains(strings.ToLower(msg), "token") {
+			return "ошибка YouTube API"
+		}
+		if len(msg) > 300 {
+			return msg[:300]
+		}
+		return msg
+	}
 }
 
 func videoDownloadName(display string) string {

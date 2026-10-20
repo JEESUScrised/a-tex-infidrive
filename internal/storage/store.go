@@ -18,14 +18,19 @@ import (
 )
 
 const (
-	KindEncode = "encode"
-	KindDecode = "decode"
+	KindEncode        = "encode"
+	KindDecode        = "decode"
+	KindYouTubeUpload = "youtube_upload"
 
-	StatusQueued    = "queued"
-	StatusRunning   = "running"
-	StatusSucceeded = "succeeded"
-	StatusFailed    = "failed"
-	StatusCancelled = "cancelled"
+	StatusQueued     = "queued"
+	StatusRunning    = "running"
+	StatusSucceeded  = "succeeded"
+	StatusFailed     = "failed"
+	StatusCancelled  = "cancelled"
+	StatusUploading  = "uploading"
+	StatusUploaded   = "uploaded"
+	StatusProcessing = "processing"
+	StatusCompleted  = "completed"
 )
 
 var (
@@ -36,15 +41,22 @@ var (
 
 // File — загруженный пользователем исходный файл.
 type File struct {
-	ID           string `json:"id"`
-	OriginalName string `json:"original_name"`
-	MIME         string `json:"mime"`
-	Size         int64  `json:"size"`
-	SHA256       string `json:"sha256"`
-	StoredPath   string `json:"-"`
-	VideoPath    string `json:"-"`
-	CreatedAt    string `json:"created_at"`
-	HasVideo     bool   `json:"has_video"`
+	ID                      string `json:"id"`
+	OriginalName            string `json:"original_name"`
+	MIME                    string `json:"mime"`
+	Size                    int64  `json:"size"`
+	SHA256                  string `json:"sha256"`
+	StoredPath              string `json:"-"`
+	VideoPath               string `json:"-"`
+	CreatedAt               string `json:"created_at"`
+	HasVideo                bool   `json:"has_video"`
+	YouTubeVideoID          string `json:"youtube_video_id"`
+	YouTubeURL              string `json:"youtube_url"`
+	YouTubeUploadStatus     string `json:"youtube_upload_status"`
+	YouTubeProcessingStatus string `json:"youtube_processing_status"`
+	YouTubeUploadedAt       string `json:"youtube_uploaded_at"`
+	YouTubeError            string `json:"youtube_error"`
+	YouTubePrivacyStatus    string `json:"youtube_privacy_status"`
 }
 
 // Job — фоновое кодирование или восстановление.
@@ -93,6 +105,10 @@ func Open(root string) (*Store, error) {
 	}
 	s := &Store{root: root, db: db}
 	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.migrateYouTube(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -219,14 +235,20 @@ func (s *Store) GetFile(id string) (File, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	row := s.db.QueryRow(`SELECT id, original_name, mime, size, sha256, stored_path, video_path, created_at FROM files WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, original_name, mime, size, sha256, stored_path, video_path, created_at,
+		youtube_video_id, youtube_url, youtube_upload_status, youtube_processing_status,
+		youtube_uploaded_at, youtube_error, youtube_privacy_status
+		FROM files WHERE id = ?`, id)
 	return scanFile(row)
 }
 
 func (s *Store) ListFiles() ([]File, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, original_name, mime, size, sha256, stored_path, video_path, created_at FROM files ORDER BY created_at DESC LIMIT 200`)
+	rows, err := s.db.Query(`SELECT id, original_name, mime, size, sha256, stored_path, video_path, created_at,
+		youtube_video_id, youtube_url, youtube_upload_status, youtube_processing_status,
+		youtube_uploaded_at, youtube_error, youtube_privacy_status
+		FROM files ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +403,11 @@ type rowScanner interface {
 
 func scanFile(row rowScanner) (File, error) {
 	var f File
-	err := row.Scan(&f.ID, &f.OriginalName, &f.MIME, &f.Size, &f.SHA256, &f.StoredPath, &f.VideoPath, &f.CreatedAt)
+	err := row.Scan(
+		&f.ID, &f.OriginalName, &f.MIME, &f.Size, &f.SHA256, &f.StoredPath, &f.VideoPath, &f.CreatedAt,
+		&f.YouTubeVideoID, &f.YouTubeURL, &f.YouTubeUploadStatus, &f.YouTubeProcessingStatus,
+		&f.YouTubeUploadedAt, &f.YouTubeError, &f.YouTubePrivacyStatus,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return File{}, ErrNotFound
 	}
@@ -405,6 +431,9 @@ func scanJob(row rowScanner) (Job, error) {
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// NowUTC — метка времени для метаданных YouTube.
+func NowUTC() string { return now() }
 
 func newID() (string, error) {
 	var b [16]byte

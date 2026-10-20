@@ -16,6 +16,7 @@ import (
 	"ytdrive/internal/httpapi"
 	"ytdrive/internal/jobs"
 	"ytdrive/internal/storage"
+	"ytdrive/internal/youtube"
 )
 
 func main() {
@@ -40,13 +41,30 @@ func main() {
 	}
 	defer store.Close()
 
-	manager := jobs.New(store, cfg.Encode, cfg.Workers, cfg.QueueSize)
+	var yt youtube.VideoStorageProvider = youtube.Unconfigured{}
+	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
+		svc, err := youtube.NewService(youtube.Credentials{
+			ClientID:     cfg.GoogleClientID,
+			ClientSecret: cfg.GoogleClientSecret,
+			RedirectURL:  cfg.GoogleRedirectURL,
+		}, store)
+		if err != nil {
+			log.Printf("YouTube: %v", err)
+		} else {
+			yt = svc
+			log.Printf("YouTube Data API: OAuth настроен, redirect=%s", cfg.GoogleRedirectURL)
+		}
+	} else {
+		log.Printf("YouTube: GOOGLE_CLIENT_ID/SECRET не заданы — загрузка отключена")
+	}
+
+	manager := jobs.New(store, cfg.Encode, cfg.Workers, cfg.QueueSize, yt)
 	manager.Start()
 	defer manager.Stop()
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(store, manager, cfg).Handler(),
+		Handler:           httpapi.New(store, manager, cfg, yt).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errCh := make(chan error, 1)
