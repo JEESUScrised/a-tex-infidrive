@@ -1,13 +1,14 @@
 import {ArrowUpFromLine} from '@gravity-ui/icons';
-import {Button, Flex, Icon} from '@gravity-ui/uikit';
+import {Button, Flex, Icon, Text} from '@gravity-ui/uikit';
 import {useCallback, useRef, useState, type DragEvent} from 'react';
 
 interface Props {
     disabled?: boolean;
+    hint?: string;
     onFiles: (files: File[]) => void;
 }
 
-export function FileUploadZone({disabled, onFiles}: Props) {
+export function FileUploadZone({disabled, hint, onFiles}: Props) {
     const inputRef = useRef<HTMLInputElement>(null);
     const [dragOver, setDragOver] = useState(false);
 
@@ -51,6 +52,11 @@ export function FileUploadZone({disabled, onFiles}: Props) {
                 >
                     Выбрать файл
                 </Button>
+                {hint ? (
+                    <Text color="secondary" style={{textAlign: 'center', maxWidth: 420}}>
+                        {hint}
+                    </Text>
+                ) : null}
                 <input
                     ref={inputRef}
                     type="file"

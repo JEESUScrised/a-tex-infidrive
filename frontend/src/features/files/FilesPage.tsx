@@ -220,14 +220,33 @@ export function FilesPage() {
                 }
             />
             <FileUploadZone
-                disabled={upload.isPending}
+                disabled={upload.isPending || busy}
+                hint="До 50 МиБ. Большие файлы обрабатываются по частям — это может занять несколько минут."
                 onFiles={async (files) => {
                     setError(null);
+                    const maxBytes = 50 * 1024 * 1024;
                     for (const file of files) {
+                        if (file.size > maxBytes) {
+                            const msg = `Файл «${file.name}» больше 50 МиБ (${formatBytes(file.size)})`;
+                            setError(msg);
+                            toaster.add({name: 'up', title: 'Слишком большой файл', content: msg, theme: 'danger'});
+                            continue;
+                        }
+                        setBusy(true);
+                        setProgress({
+                            percent: 8,
+                            message: `Загрузка и кодирование «${file.name}»…`,
+                        });
                         try {
                             await upload.mutateAsync({file, folderId});
+                            toaster.add({name: 'up', title: 'Файл принят', theme: 'success'});
+                            setProgress(null);
                         } catch (err) {
-                            setError(err instanceof ApiError ? err.message : 'Ошибка загрузки');
+                            const msg = err instanceof ApiError ? err.message : 'Ошибка загрузки';
+                            setError(msg);
+                            setProgress(null);
+                        } finally {
+                            setBusy(false);
                         }
                     }
                 }}
