@@ -12,17 +12,25 @@ function readCookie(name: string): string | undefined {
     return undefined;
 }
 
-async function ensureCsrf(): Promise<string> {
-    const existing = readCookie('infidrive_csrf');
-    if (existing) {
-        return existing;
+async function ensureCsrf(forceRefresh = false): Promise<string> {
+    if (!forceRefresh) {
+        const existing = readCookie('infidrive_csrf');
+        if (existing) {
+            return existing;
+        }
     }
-    const response = await fetch('/api/auth/csrf', {credentials: 'include'});
+    const response = await fetch('/api/auth/csrf', {credentials: 'include', cache: 'no-store'});
     if (!response.ok) {
-        return '';
+        return readCookie('infidrive_csrf') ?? '';
     }
     const body = (await response.json()) as {csrf_token?: string};
-    return body.csrf_token ?? readCookie('infidrive_csrf') ?? '';
+    const token = body.csrf_token ?? '';
+    // Страховка double-submit: если Set-Cookie не сохранился, выставляем сами.
+    if (token) {
+        const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `infidrive_csrf=${encodeURIComponent(token)}; Path=/; SameSite=Lax${secure}`;
+    }
+    return token || readCookie('infidrive_csrf') || '';
 }
 
 async function parseBody(response: Response): Promise<unknown> {
@@ -41,7 +49,9 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     const headers = new Headers(init?.headers);
     const method = (init?.method ?? 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD') {
-        const csrf = await ensureCsrf();
+        // Для login всегда свежий CSRF — иначе рассинхрон cookie/заголовка даёт 403.
+        const force = path.includes('/auth/login') || path.includes('/auth/logout');
+        const csrf = await ensureCsrf(force);
         if (csrf) {
             headers.set('X-CSRF-Token', csrf);
         }

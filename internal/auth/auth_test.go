@@ -63,6 +63,7 @@ func TestLoginLimiter(t *testing.T) {
 		if !l.Allow(req) {
 			t.Fatalf("attempt %d blocked", i)
 		}
+		l.Fail(req)
 	}
 	if l.Allow(req) {
 		t.Fatal("expected block")

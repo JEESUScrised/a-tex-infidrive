@@ -28,12 +28,13 @@ export function LoginPage() {
         login.mutate({username, password});
     };
 
-    const error =
-        login.error instanceof ApiError
+    const error = login.isError
+        ? login.error instanceof ApiError
             ? login.error.message
-            : login.isError
-              ? 'Не удалось войти'
-              : null;
+            : login.error instanceof Error
+              ? login.error.message
+              : 'Не удалось войти'
+        : null;
 
     return (
         <div className="yt-login">

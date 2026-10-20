@@ -59,11 +59,12 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.limiter.Allow(r) {
-		writeError(w, http.StatusTooManyRequests, "слишком много попыток входа")
+		writeError(w, http.StatusTooManyRequests, "слишком много попыток входа, подождите несколько минут")
 		return
 	}
 	if !auth.CheckCSRF(r) {
-		writeError(w, http.StatusForbidden, "недействительный CSRF-токен")
+		s.limiter.Fail(r)
+		writeError(w, http.StatusForbidden, "недействительный CSRF-токен — обновите страницу и попробуйте снова")
 		return
 	}
 	var req loginRequest
@@ -73,10 +74,12 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	if req.Username != s.cfg.AdminUsername {
+		s.limiter.Fail(r)
 		writeError(w, http.StatusUnauthorized, auth.ErrInvalidCredentials.Error())
 		return
 	}
 	if err := auth.CheckPassword(s.cfg.AdminPasswordHash, req.Password); err != nil {
+		s.limiter.Fail(r)
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
