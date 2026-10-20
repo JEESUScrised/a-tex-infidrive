@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"ytdrive/internal/auth"
 	"ytdrive/internal/config"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/jobs"
@@ -22,11 +24,13 @@ const version = "1.0.0"
 
 // Server связывает хранилище, очередь и статику.
 type Server struct {
-	store   *storage.Store
-	jobs    *jobs.Manager
-	cfg     config.Config
-	youtube youtube.VideoStorageProvider
-	web     http.Handler
+	store    *storage.Store
+	jobs     *jobs.Manager
+	cfg      config.Config
+	youtube  youtube.VideoStorageProvider
+	web      http.Handler
+	sessions *auth.Manager
+	limiter  *auth.LoginLimiter
 }
 
 // New собирает HTTP-обработчик. Каталог данных не публикуется.
@@ -35,13 +39,22 @@ func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt yout
 	if yt == nil {
 		yt = youtube.Unconfigured{}
 	}
-	return &Server{
+	s := &Server{
 		store:   store,
 		jobs:    manager,
 		cfg:     cfg,
 		youtube: yt,
 		web:     spaFileServer(web),
+		limiter: auth.NewLoginLimiter(10, 15*time.Minute),
 	}
+	if cfg.AuthEnabled {
+		secret := cfg.SessionSecret
+		if secret == "" {
+			secret = "dev-only-insecure-session-secret!!!!"
+		}
+		s.sessions = auth.NewManager(secret, cfg.CookieSecure)
+	}
+	return s
 }
 
 // Handler возвращает маршрутизатор.
@@ -49,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			s.handleAPI(w, r)
 			return
@@ -63,15 +77,46 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	if path != "" {
 		parts = strings.Split(path, "/")
 	}
+
+	// Публичные маршруты.
 	switch {
 	case r.Method == http.MethodGet && path == "health":
 		s.health(w, r)
+		return
+	case r.Method == http.MethodGet && path == "auth/csrf":
+		s.authCSRF(w, r)
+		return
+	case r.Method == http.MethodGet && path == "auth/me":
+		s.authMe(w, r)
+		return
+	case r.Method == http.MethodPost && path == "auth/login":
+		s.authLogin(w, r)
+		return
+	case r.Method == http.MethodGet && path == "youtube/callback":
+		// OAuth redirect: session обязательна, CSRF не требуется (top-level GET).
+		if !s.requireAuthSession(w, r) {
+			return
+		}
+		s.youtubeAuthCallback(w, r)
+		return
+	}
+
+	if path == "auth/logout" && r.Method == http.MethodPost {
+		s.authLogout(w, r)
+		return
+	}
+
+	if !s.requireAuth(w, r) {
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodGet && path == "system":
+		s.healthDetailed(w, r)
 	case r.Method == http.MethodGet && path == "youtube":
 		s.youtubeStatus(w, r)
 	case r.Method == http.MethodGet && path == "youtube/auth/start":
 		s.youtubeAuthStart(w, r)
-	case r.Method == http.MethodGet && path == "youtube/callback":
-		s.youtubeAuthCallback(w, r)
 	case r.Method == http.MethodPost && path == "youtube/disconnect":
 		s.youtubeDisconnect(w, r)
 	case r.Method == http.MethodPost && path == "files":
@@ -106,11 +151,28 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
+	out := map[string]any{
+		"status":  "ok",
+		"version": version,
+		"app":     s.cfg.AppName,
+	}
+	// Подробности FFmpeg — только для авторизованной диагностики через settings.
+	if !s.cfg.AuthEnabled || s.cfg.AppEnv != config.EnvProduction {
+		runner := ffmpeg.New(s.cfg.FFmpeg, s.cfg.FFProbe)
+		ok := runner.Available() == nil
+		out["ffmpeg"] = ok
+		out["ffmpeg_source"] = s.cfg.FFmpegSource
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) healthDetailed(w http.ResponseWriter, _ *http.Request) {
 	runner := ffmpeg.New(s.cfg.FFmpeg, s.cfg.FFProbe)
 	ok := runner.Available() == nil
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "ok",
 		"version":       version,
+		"app":           s.cfg.AppName,
 		"ffmpeg":        ok,
 		"ffmpeg_path":   s.cfg.FFmpeg,
 		"ffprobe_path":  s.cfg.FFProbe,
@@ -177,7 +239,7 @@ func (s *Server) downloadOriginal(w http.ResponseWriter, r *http.Request, id str
 		writeStoreError(w, err)
 		return
 	}
-	serveFile(w, r, f.StoredPath, f.OriginalName)
+	s.serveStored(w, r, f.StoredPath, f.OriginalName)
 }
 
 func (s *Server) downloadVideo(w http.ResponseWriter, r *http.Request, id string) {
@@ -190,7 +252,7 @@ func (s *Server) downloadVideo(w http.ResponseWriter, r *http.Request, id string
 		writeError(w, http.StatusNotFound, "видео ещё не создано")
 		return
 	}
-	serveFile(w, r, f.VideoPath, strings.TrimSuffix(f.OriginalName, filepath.Ext(f.OriginalName))+".mp4")
+	s.serveStored(w, r, f.VideoPath, strings.TrimSuffix(f.OriginalName, filepath.Ext(f.OriginalName))+".mp4")
 }
 
 func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
@@ -307,20 +369,25 @@ func (s *Server) downloadJob(w http.ResponseWriter, r *http.Request, id string) 
 	if name == "" {
 		name = "restored.bin"
 	}
-	serveFile(w, r, job.OutputPath, name)
+	s.serveStored(w, r, job.OutputPath, name)
 }
 
-func serveFile(w http.ResponseWriter, r *http.Request, path, name string) {
+func (s *Server) serveStored(w http.ResponseWriter, r *http.Request, path, name string) {
 	if path == "" {
 		writeError(w, http.StatusNotFound, "файл не найден")
 		return
 	}
 	clean := filepath.Clean(path)
+	if !s.store.ContainsPath(clean) {
+		writeError(w, http.StatusNotFound, "файл не найден")
+		return
+	}
 	if _, err := os.Stat(clean); err != nil {
 		writeError(w, http.StatusNotFound, "файл не найден")
 		return
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", storage.SanitizeName(name)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, clean)
 }
 

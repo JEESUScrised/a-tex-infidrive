@@ -114,6 +114,17 @@ func (s *Store) LoadToken(_ context.Context, provider string) (youtube.TokenReco
 	if err != nil {
 		return youtube.TokenRecord{}, err
 	}
+	if s.box != nil {
+		at, err := s.box.Open(rec.AccessToken)
+		if err != nil {
+			return youtube.TokenRecord{}, err
+		}
+		rt, err := s.box.Open(rec.RefreshToken)
+		if err != nil {
+			return youtube.TokenRecord{}, err
+		}
+		rec.AccessToken, rec.RefreshToken = at, rt
+	}
 	if expiry != "" {
 		if t, e := time.Parse(time.RFC3339, expiry); e == nil {
 			rec.Expiry = t
@@ -126,6 +137,18 @@ func (s *Store) LoadToken(_ context.Context, provider string) (youtube.TokenReco
 func (s *Store) SaveToken(_ context.Context, provider string, tok youtube.TokenRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	access, refresh := tok.AccessToken, tok.RefreshToken
+	if s.box != nil {
+		var err error
+		access, err = s.box.Seal(access)
+		if err != nil {
+			return err
+		}
+		refresh, err = s.box.Seal(refresh)
+		if err != nil {
+			return err
+		}
+	}
 	expiry := ""
 	if !tok.Expiry.IsZero() {
 		expiry = tok.Expiry.UTC().Format(time.RFC3339)
@@ -138,7 +161,7 @@ func (s *Store) SaveToken(_ context.Context, provider string, tok youtube.TokenR
 			token_type = excluded.token_type,
 			expiry = excluded.expiry,
 			updated_at = excluded.updated_at`,
-		provider, tok.AccessToken, tok.RefreshToken, tok.TokenType, expiry, now())
+		provider, access, refresh, tok.TokenType, expiry, now())
 	return err
 }
 

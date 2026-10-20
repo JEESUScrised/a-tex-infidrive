@@ -75,25 +75,59 @@ type Job struct {
 	UpdatedAt  string `json:"updated_at"`
 }
 
+// Paths — каталоги и файл БД. Имя ytdrive.db сохранено для совместимости миграций.
+type Paths struct {
+	Root     string
+	Database string
+	Temp     string
+}
+
 // Store — SQLite и каталог данных.
 type Store struct {
 	root string
+	tmp  string
 	db   *sql.DB
 	mu   sync.Mutex
+	box  tokenBox
+}
+
+// tokenBox шифрует OAuth-токены. Опционально.
+type tokenBox interface {
+	Seal(string) (string, error)
+	Open(string) (string, error)
 }
 
 // Open создаёт каталоги и схему. Соединение одно, чтобы не ловить блокировки SQLite.
 func Open(root string) (*Store, error) {
+	return OpenPaths(Paths{Root: root})
+}
+
+// OpenPaths открывает хранилище с явными путями (production).
+func OpenPaths(p Paths) (*Store, error) {
+	root := p.Root
+	if root == "" {
+		return nil, fmt.Errorf("не задан каталог хранения")
+	}
+	tmp := p.Temp
+	if tmp == "" {
+		tmp = filepath.Join(root, "tmp")
+	}
+	dbPath := p.Database
+	if dbPath == "" {
+		dbPath = filepath.Join(root, "ytdrive.db")
+	}
 	if err := os.MkdirAll(filepath.Join(root, "objects"), 0o750); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Join(root, "jobs"), 0o750); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o750); err != nil {
+	if err := os.MkdirAll(tmp, 0o750); err != nil {
 		return nil, err
 	}
-	dbPath := filepath.Join(root, "ytdrive.db")
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
@@ -103,7 +137,7 @@ func Open(root string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	s := &Store{root: root, db: db}
+	s := &Store{root: root, tmp: tmp, db: db}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -113,6 +147,28 @@ func Open(root string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// SetTokenBox включает шифрование OAuth-токенов at rest.
+func (s *Store) SetTokenBox(box tokenBox) { s.box = box }
+
+// TempDir возвращает каталог временных файлов.
+func (s *Store) TempDir() string {
+	if s.tmp != "" {
+		return s.tmp
+	}
+	return filepath.Join(s.root, "tmp")
+}
+
+// ContainsPath проверяет, что path лежит внутри root хранилища (защита от traversal).
+func (s *Store) ContainsPath(path string) bool {
+	clean := filepath.Clean(path)
+	root := filepath.Clean(s.root)
+	rel, err := filepath.Rel(root, clean)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func (s *Store) Close() error {
