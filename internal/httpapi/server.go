@@ -1,4 +1,4 @@
-// Package httpapi — обработчики REST и раздача страницы web/.
+// Package httpapi — обработчики REST и раздача SPA (frontend/dist).
 package httpapi
 
 import (
@@ -31,10 +31,7 @@ type Server struct {
 
 // New собирает HTTP-обработчик. Каталог данных не публикуется.
 func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider) *Server {
-	web := cfg.WebDir
-	if web == "" {
-		web = "web"
-	}
+	web := resolveWebDir(cfg.WebDir)
 	if yt == nil {
 		yt = youtube.Unconfigured{}
 	}
@@ -43,7 +40,7 @@ func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt yout
 		jobs:    manager,
 		cfg:     cfg,
 		youtube: yt,
-		web:     http.FileServer(http.Dir(web)),
+		web:     spaFileServer(web),
 	}
 }
 

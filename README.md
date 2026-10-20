@@ -34,10 +34,36 @@
 
 При старте сервер пишет диагностику в лог и отдаёт её в `GET /api/health` (`ffmpeg`, `ffmpeg_path`, `ffmpeg_source`).
 
+## Frontend (React + Gravity UI)
+
+Исходники SPA: `frontend/`. В production Go отдаёт `frontend/dist` и `/api` с одного порта.
+
+```powershell
+cd frontend
+npm install
+npm run build
+cd ..
+go run .\cmd\server
+```
+
+Разработка с hot reload:
+
+```powershell
+# терминал 1
+go run .\cmd\server
+
+# терминал 2
+cd frontend
+npm run dev
+```
+
+Vite (http://localhost:5173) проксирует `/api` на `:8080`.
+
 ## Запуск на Windows
 
 ```powershell
 cd путь\к\проекту
+cd frontend; npm run build; cd ..
 go run .\cmd\server
 ```
 
@@ -62,6 +88,7 @@ go build -o bin\server.exe .\cmd\server
 
 ```bash
 cd /path/to/project
+(cd frontend && npm install && npm run build)
 go run ./cmd/server
 ```
 
@@ -76,7 +103,7 @@ go build -o bin/ytdrive ./cmd/ytdrive
 go build -o bin/server ./cmd/server
 ```
 
-Каталог данных по умолчанию — `data/`. Страница лежит в `web/`, пользовательские файлы — только в `data/`.
+Каталог данных по умолчанию — `data/`. SPA — `frontend/dist` (fallback `web/`), пользовательские файлы — только в `data/`.
 
 ## Командная строка
 

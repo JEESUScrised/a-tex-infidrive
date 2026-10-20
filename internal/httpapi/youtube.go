@@ -62,10 +62,10 @@ func (s *Server) youtubeAuthCallback(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, youtube.ErrAuth):
 			msg = "авторизация отклонена или недействительна"
 		}
-		http.Redirect(w, r, "/?youtube_error="+url.QueryEscape(msg), http.StatusFound)
+		http.Redirect(w, r, "/youtube?error="+url.QueryEscape(msg), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, "/?youtube=connected", http.StatusFound)
+	http.Redirect(w, r, "/youtube?connected=1", http.StatusFound)
 }
 
 func (s *Server) youtubeDisconnect(w http.ResponseWriter, r *http.Request) {

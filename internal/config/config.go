@@ -37,8 +37,9 @@ func Load() Config {
 	ff, fp, src := ffmpeg.Resolve(ffHint, fpHint)
 
 	cfg := Config{
-		Addr:               env("YTDRIVE_ADDR", ":8080"),
-		DataDir:            env("YTDRIVE_DATA_DIR", "data"),
+		Addr:    env("YTDRIVE_ADDR", ":8080"),
+		DataDir: env("YTDRIVE_DATA_DIR", "data"),
+		// Пустое значение: frontend/dist, иначе web/ (см. httpapi.resolveWebDir).
 		WebDir:             env("YTDRIVE_WEB_DIR", ""),
 		MaxUpload:          int64(envInt("YTDRIVE_MAX_UPLOAD_MB", 64)) << 20,
 		Workers:            envInt("YTDRIVE_WORKERS", 1),
