@@ -4,8 +4,10 @@ import type {Theme} from '@gravity-ui/uikit';
 import {useThemeControl} from '@/app/providers';
 import {ErrorAlert} from '@/components/ErrorAlert';
 import {PageHeader} from '@/components/PageHeader';
+import {api} from '@/api/endpoints';
 import {useAuthQuery, useLogoutMutation, useProviderQuery} from '@/hooks/useApiQueries';
 import {formatBytes} from '@/lib/format';
+import {useQuery} from '@tanstack/react-query';
 
 const themes: {id: Theme; label: string}[] = [
     {id: 'system', label: 'Системная'},
@@ -17,6 +19,11 @@ export function SettingsPage() {
     const auth = useAuthQuery();
     const logout = useLogoutMutation();
     const provider = useProviderQuery();
+    const retrieval = useQuery({
+        queryKey: ['retrieval'],
+        queryFn: api.retrievalStatus,
+        retry: false,
+    });
     const {theme, setTheme} = useThemeControl();
 
     return (
@@ -77,6 +84,11 @@ export function SettingsPage() {
                                 <Label theme="unknown">{formatBytes(provider.data.usage_bytes)}</Label>
                             ) : null}
                         </Flex>
+                    ) : null}
+                    {retrieval.data ? (
+                        <Text color="secondary" className="yt-mono">
+                            Retrieval ({retrieval.data.name}): {retrieval.data.message}
+                        </Text>
                     ) : null}
                 </Flex>
             </Card>

@@ -1,7 +1,7 @@
 import {Button, Flex, Loader, Table, Text, TextInput, useToaster} from '@gravity-ui/uikit';
-import {useMemo, useState} from 'react';
+import {useMemo, useRef, useState} from 'react';
 
-import {driveUrls} from '@/api/endpoints';
+import {api, driveUrls} from '@/api/endpoints';
 import {EmptyState} from '@/components/EmptyState';
 import {ErrorAlert} from '@/components/ErrorAlert';
 import {PageHeader} from '@/components/PageHeader';
@@ -17,11 +17,22 @@ import {formatBytes, formatDate} from '@/lib/format';
 import {ApiError} from '@/types/api';
 import type {DriveFile, DriveFolder} from '@/types/drive';
 
+function triggerBlobDownload(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
 export function FilesPage() {
     const toaster = useToaster();
     const [folderId, setFolderId] = useState('');
     const [folderName, setFolderName] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [restoreId, setRestoreId] = useState<string | null>(null);
+    const restoreInput = useRef<HTMLInputElement>(null);
     const drive = useDriveQuery(folderId);
     const upload = useUploadMutation();
     const createFolder = useCreateFolderMutation();
@@ -64,8 +75,43 @@ export function FilesPage() {
                     }
                     return (
                         <Flex gap={1} wrap>
-                            <Button view="outlined" size="s" href={driveUrls.download(row.id)}>
+                            <Button
+                                view="outlined"
+                                size="s"
+                                onClick={async () => {
+                                    try {
+                                        const response = await fetch(driveUrls.download(row.id), {
+                                            credentials: 'include',
+                                        });
+                                        if (response.status === 503) {
+                                            toaster.add({
+                                                name: 'dl',
+                                                title: 'Авто-скачивание недоступно',
+                                                content: 'Импортируйте MP4 вручную (кнопка «Из MP4»)',
+                                                theme: 'warning',
+                                            });
+                                            return;
+                                        }
+                                        if (!response.ok) {
+                                            throw new Error(await response.text());
+                                        }
+                                        triggerBlobDownload(await response.blob(), row.name);
+                                    } catch (err) {
+                                        setError(err instanceof Error ? err.message : 'Ошибка');
+                                    }
+                                }}
+                            >
                                 Скачать
+                            </Button>
+                            <Button
+                                view="outlined"
+                                size="s"
+                                onClick={() => {
+                                    setRestoreId(row.id);
+                                    restoreInput.current?.click();
+                                }}
+                            >
+                                Из MP4
                             </Button>
                             <Button
                                 view="outlined"
@@ -74,7 +120,9 @@ export function FilesPage() {
                                 onClick={async () => {
                                     try {
                                         const link = await share.mutateAsync({id: row.id});
-                                        await navigator.clipboard.writeText(link.url || `${window.location.origin}/s/${link.token}`);
+                                        await navigator.clipboard.writeText(
+                                            link.url || `${window.location.origin}/s/${link.token}`,
+                                        );
                                         toaster.add({
                                             name: 'share',
                                             title: 'Ссылка скопирована',
@@ -110,6 +158,34 @@ export function FilesPage() {
 
     return (
         <div className="yt-page">
+            <input
+                ref={restoreInput}
+                type="file"
+                accept="video/mp4,.mp4"
+                hidden
+                onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    const id = restoreId;
+                    event.target.value = '';
+                    setRestoreId(null);
+                    if (!file || !id) {
+                        return;
+                    }
+                    try {
+                        const blob = await api.restoreFromMp4(id, file);
+                        const name =
+                            drive.data?.files.find((f) => f.id === id)?.name || 'restored.bin';
+                        triggerBlobDownload(blob, name);
+                        toaster.add({
+                            name: 'restore',
+                            title: 'Файл восстановлен',
+                            theme: 'success',
+                        });
+                    } catch (err) {
+                        setError(err instanceof Error ? err.message : 'Ошибка восстановления');
+                    }
+                }}
+            />
             <PageHeader
                 title="Мои файлы"
                 actions={

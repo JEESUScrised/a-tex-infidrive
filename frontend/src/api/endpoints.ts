@@ -54,6 +54,34 @@ export const api = {
         apiRequest<{status: string}>(`/api/drive/shares/${id}`, {method: 'DELETE'}),
 
     providerStatus: () => apiRequest<ProviderStatus>('/api/drive/provider'),
+
+    restoreFromMp4: async (id: string, file: File) => {
+        const form = new FormData();
+        form.append('file', file);
+        const response = await fetch(`/api/drive/${id}/restore`, {
+            method: 'POST',
+            body: form,
+            credentials: 'include',
+            headers: {
+                'X-CSRF-Token':
+                    document.cookie
+                        .split(';')
+                        .map((c) => c.trim())
+                        .find((c) => c.startsWith('infidrive_csrf='))
+                        ?.slice('infidrive_csrf='.length) ?? '',
+            },
+        });
+        if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || response.statusText);
+        }
+        return response.blob();
+    },
+
+    retrievalStatus: () =>
+        apiRequest<{name: string; available: boolean; message: string; automatic: boolean; manual_fallback: boolean}>(
+            '/api/admin/retrieval',
+        ),
 };
 
 export const driveUrls = {

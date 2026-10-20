@@ -1,5 +1,7 @@
 import {BrowserRouter, Navigate, Route, Routes} from 'react-router-dom';
 
+import {ShareLandingPage} from '@/features/shares/ShareLandingPage';
+
 import {AppLayout} from '@/components/layout/AppLayout';
 import {LoginPage} from '@/features/auth/LoginPage';
 import {RequireAuth} from '@/features/auth/RequireAuth';
@@ -13,6 +15,7 @@ export function AppRouter() {
         <BrowserRouter>
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/s/:token" element={<ShareLandingPage />} />
                 <Route element={<RequireAuth />}>
                     <Route element={<AppLayout />}>
                         <Route index element={<FilesPage />} />
