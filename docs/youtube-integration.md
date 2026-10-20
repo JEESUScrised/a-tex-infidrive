@@ -9,7 +9,7 @@ A-Tex InfiDrive загружает локально собранный MP4 че�
 2. Ручной запуск «Загрузить на YouTube» (privacy по умолчанию `private`).
 3. Ожидание обработки на стороне YouTube.
 4. Скачивание своего ролика в [YouTube Studio](https://studio.youtube.com/).
-5. Импорт MP4 в YTDrive через «Восстановить из MP4».
+5. Импорт MP4 в InfiDrive через «Восстановить из MP4».
 6. Проверка SHA-256.
 
 Автотест этого пути: `TestStudioDownloadRecoveryScenario` (повторное сжатие H.264 имитирует файл из Studio).
@@ -21,14 +21,16 @@ A-Tex InfiDrive загружает локально собранный MP4 че�
 3. Настройте экран согласия OAuth (тип External для личного аккаунта; добавьте свой email в тестовые пользователи).
 4. Создайте учётные данные **OAuth client ID** → тип **Веб-приложение**.
 5. Authorized redirect URIs:
-   - локально: `http://localhost:8080/api/youtube/callback`
+   - локально: `http://localhost:8092/api/youtube/callback`
+   - production: `https://app.a-tex-infidrive.ru/api/youtube/callback`
    - при другом порте поменяйте и `GOOGLE_REDIRECT_URL`.
 6. Скопируйте Client ID и Client Secret в `.env` (файл не коммитится):
 
 ```env
 GOOGLE_CLIENT_ID=....apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URL=http://localhost:8080/api/youtube/callback
+GOOGLE_REDIRECT_URL=http://localhost:8092/api/youtube/callback
+# production: https://app.a-tex-infidrive.ru/api/youtube/callback
 ```
 
 Минимальные scope: `youtube.upload` и `youtube.readonly` (название канала).
