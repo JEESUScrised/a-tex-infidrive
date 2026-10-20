@@ -1,0 +1,30 @@
+[Unit]
+Description=A-Tex InfiDrive
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=infidrive
+Group=infidrive
+WorkingDirectory=/opt/infidrive/current
+EnvironmentFile=/etc/infidrive/env
+ExecStart=/opt/infidrive/current/bin/infidrive
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGTERM
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/infidrive /var/log/infidrive
+UMask=0077
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=infidrive
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,24 @@
+# Интегрируйте в существующий Caddyfile или подключите через import.
+# Перед HTTPS убедитесь, что DNS A-записи указывают на этот сервер.
+
+a-tex-infidrive.ru {
+	root * /var/www/infidrive-site
+	encode gzip
+	try_files {path} {path}.html /index.html
+	file_server
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+	}
+}
+
+app.a-tex-infidrive.ru {
+	encode gzip
+	reverse_proxy 127.0.0.1:8092
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+	}
+}
