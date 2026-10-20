@@ -1,5 +1,5 @@
 import {apiRequest} from '@/api/client';
-import type {AuthMe, HealthStatus} from '@/types/api';
+import type {AuthMe, HealthStatus, YouTubeStatus} from '@/types/api';
 import type {DriveFile, DriveFolder, DriveListing, ProviderStatus, ShareLink} from '@/types/drive';
 
 export const api = {
@@ -12,6 +12,11 @@ export const api = {
             body: JSON.stringify({username, password}),
         }),
     logout: () => apiRequest<{status: string}>('/api/auth/logout', {method: 'POST'}),
+
+    youtubeStatus: () => apiRequest<YouTubeStatus>('/api/youtube'),
+    youtubeAuthStart: () => apiRequest<{auth_url: string}>('/api/youtube/auth/start'),
+    youtubeDisconnect: () =>
+        apiRequest<{status: string}>('/api/youtube/disconnect', {method: 'POST'}),
 
     listDrive: (folderId = '') =>
         apiRequest<DriveListing>(`/api/drive${folderId ? `?folder_id=${encodeURIComponent(folderId)}` : ''}`),

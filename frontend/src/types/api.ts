@@ -65,12 +65,25 @@ export interface YouTubeChannel {
     title: string;
 }
 
+export interface YouTubeRetrievalMeta {
+    name: string;
+    available: boolean;
+    message: string;
+    automatic: boolean;
+    manual_fallback: boolean;
+}
+
 export interface YouTubeStatus {
     enabled: boolean;
     connected: boolean;
     provider: string;
     message: string;
     channel: YouTubeChannel | null;
+    redirect_uri?: string;
+    privacy_status?: string;
+    experimental_store?: boolean;
+    oauth_credentials_set?: boolean;
+    retrieval?: YouTubeRetrievalMeta;
 }
 
 export interface YouTubeFileStatus {

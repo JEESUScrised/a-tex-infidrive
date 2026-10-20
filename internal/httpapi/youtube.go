@@ -11,14 +11,28 @@ import (
 )
 
 func (s *Server) youtubeStatus(w http.ResponseWriter, r *http.Request) {
+	privacy := s.cfg.YouTubePrivacy
+	if privacy == "" {
+		privacy = "private"
+	}
 	out := map[string]any{
-		"enabled":   s.youtube.Configured(),
-		"connected": false,
-		"provider":  "unconfigured",
-		"message":   youtube.ErrNotConfigured.Error(),
-		"channel":   nil,
+		"enabled":               s.youtube.Configured(),
+		"connected":             false,
+		"provider":              "unconfigured",
+		"message":               youtube.ErrNotConfigured.Error(),
+		"channel":               nil,
+		"redirect_uri":          s.cfg.GoogleRedirectURL,
+		"privacy_status":        privacy,
+		"experimental_store":    s.cfg.ExperimentalYouTubeStore,
+		"oauth_credentials_set": s.cfg.GoogleClientID != "" && s.cfg.GoogleClientSecret != "",
+	}
+	if s.pipeline != nil {
+		out["retrieval"] = s.pipeline.RetrieverMeta(r.Context())
 	}
 	if !s.youtube.Configured() {
+		if s.cfg.GoogleClientID == "" || s.cfg.GoogleClientSecret == "" {
+			out["message"] = "Google OAuth credentials не заданы в /etc/infidrive/env (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)"
+		}
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
@@ -62,10 +76,10 @@ func (s *Server) youtubeAuthCallback(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, youtube.ErrAuth):
 			msg = "авторизация отклонена или недействительна"
 		}
-		http.Redirect(w, r, "/youtube?error="+url.QueryEscape(msg), http.StatusFound)
+		http.Redirect(w, r, "/settings?youtube_error="+url.QueryEscape(msg), http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, "/youtube?connected=1", http.StatusFound)
+	http.Redirect(w, r, "/settings?youtube=connected", http.StatusFound)
 }
 
 func (s *Server) youtubeDisconnect(w http.ResponseWriter, r *http.Request) {

@@ -91,6 +91,34 @@ export function useLogoutMutation() {
     });
 }
 
+export function useYouTubeQuery() {
+    return useQuery({
+        queryKey: queryKeys.youtube,
+        queryFn: api.youtubeStatus,
+        staleTime: 15_000,
+        retry: false,
+    });
+}
+
+export function useYouTubeConnectMutation() {
+    return useMutation({
+        mutationFn: api.youtubeAuthStart,
+        onSuccess: ({auth_url}) => {
+            window.location.assign(auth_url);
+        },
+    });
+}
+
+export function useYouTubeDisconnectMutation() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: api.youtubeDisconnect,
+        onSuccess: async () => {
+            await qc.invalidateQueries({queryKey: queryKeys.youtube});
+        },
+    });
+}
+
 export function useUploadMutation() {
     const invalidate = useInvalidateDrive();
     return useMutation({

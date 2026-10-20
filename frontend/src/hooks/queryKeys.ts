@@ -6,4 +6,6 @@ export const queryKeys = {
     trash: ['trash'] as const,
     shares: ['shares'] as const,
     provider: ['provider'] as const,
+    youtube: ['youtube'] as const,
+    retrieval: ['retrieval'] as const,
 };
