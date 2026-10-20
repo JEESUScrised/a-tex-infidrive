@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"ytdrive/internal/config"
+	"ytdrive/internal/cryptoutil"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/httpapi"
 	"ytdrive/internal/jobs"
@@ -20,26 +22,55 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("конфигурация: %v", err)
+	}
 	addr := flag.String("addr", cfg.Addr, "адрес HTTP")
-	data := flag.String("data", cfg.DataDir, "каталог данных и SQLite")
+	data := flag.String("data", cfg.StoragePath, "каталог данных")
 	flag.Parse()
 	cfg.Addr = *addr
+	cfg.StoragePath = *data
 	cfg.DataDir = *data
+	if os.Getenv("DATABASE_PATH") == "" {
+		cfg.DatabasePath = filepath.Join(cfg.StoragePath, "ytdrive.db")
+	}
+	if os.Getenv("TEMP_PATH") == "" {
+		cfg.TempPath = filepath.Join(cfg.StoragePath, "tmp")
+	}
 
 	if err := cfg.Encode.PrepareEncode(); err != nil {
 		log.Fatalf("параметры кодирования: %v", err)
 	}
-	log.Printf("диагностика FFmpeg: %s", ffmpeg.Diagnose(cfg.FFmpeg, cfg.FFProbe))
+	log.Printf("%s: диагностика FFmpeg: %s", cfg.AppName, ffmpeg.Diagnose(cfg.FFmpeg, cfg.FFProbe))
 	if err := ffmpeg.New(cfg.FFmpeg, cfg.FFProbe).Available(); err != nil {
 		log.Printf("предупреждение: %v — задания кодирования завершатся ошибкой", err)
 	}
 
-	store, err := storage.Open(cfg.DataDir)
+	store, err := storage.OpenPaths(storage.Paths{
+		Root:     cfg.StoragePath,
+		Database: cfg.DatabasePath,
+		Temp:     cfg.TempPath,
+	})
 	if err != nil {
 		log.Fatalf("хранилище: %v", err)
 	}
 	defer store.Close()
+
+	if len(cfg.TokenEncryptionKey) > 0 {
+		box, err := cryptoutil.NewBox(cfg.TokenEncryptionKey)
+		if err != nil {
+			log.Fatalf("шифрование токенов: %v", err)
+		}
+		store.SetTokenBox(box)
+		log.Printf("OAuth-токены: шифрование at rest включено")
+	}
+
+	if cfg.AuthEnabled {
+		log.Printf("режим доступа: single-admin (%s)", cfg.AdminUsername)
+	} else {
+		log.Printf("режим доступа: открытый API (только для development)")
+	}
 
 	var yt youtube.VideoStorageProvider = youtube.Unconfigured{}
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
@@ -69,7 +100,7 @@ func main() {
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("YTDrive слушает %s, данные в %s", cfg.Addr, cfg.DataDir)
+		log.Printf("%s слушает %s, данные в %s", cfg.AppName, cfg.Addr, cfg.StoragePath)
 		errCh <- srv.ListenAndServe()
 	}()
 
