@@ -1,5 +1,6 @@
 import {apiRequest} from '@/api/client';
 import type {
+    AuthMe,
     HealthStatus,
     Job,
     StoredFile,
@@ -9,6 +10,18 @@ import type {
 
 export const api = {
     health: () => apiRequest<HealthStatus>('/api/health'),
+
+    system: () => apiRequest<HealthStatus>('/api/system'),
+
+    authMe: () => apiRequest<AuthMe>('/api/auth/me'),
+
+    login: (username: string, password: string) =>
+        apiRequest<AuthMe>('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({username, password}),
+        }),
+
+    logout: () => apiRequest<{status: string}>('/api/auth/logout', {method: 'POST'}),
 
     listFiles: () => apiRequest<StoredFile[]>('/api/files'),
 

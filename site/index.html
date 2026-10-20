@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A-Tex InfiDrive — A-Tex Group</title>
+    <meta
+      name="description"
+      content="A-Tex InfiDrive — экспериментальный сервис кодирования файлов в видео для ограниченного сценария хранения через YouTube."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <strong>A-Tex InfiDrive</strong>
+        <span>продукт A-Tex Group</span>
+      </div>
+      <nav>
+        <a href="/privacy">Конфиденциальность</a>
+        <a href="/terms">Условия</a>
+        <a class="cta" href="https://app.a-tex-infidrive.ru">Открыть приложение</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">A-Tex Group</p>
+        <h1>A-Tex InfiDrive</h1>
+        <p class="lead">
+          Экспериментальный сервис: произвольный файл кодируется в MP4, при необходимости
+          загружается на YouTube через официальный Data API, а затем может быть восстановлен
+          из полученного видеофайла.
+        </p>
+        <p>
+          <a class="cta" href="https://app.a-tex-infidrive.ru">Перейти в приложение</a>
+        </p>
+      </section>
+
+      <section>
+        <h2>Как это работает</h2>
+        <p>
+          Данные укладываются в яркостные блоки кадров по формату InfiDrive/YTDrive v1,
+          упаковываются в H.264 через FFmpeg и при желании публикуются как private-видео
+          через Google OAuth и YouTube Data API v3. Восстановление выполняется по MP4,
+          который вы сами скачиваете (например, из YouTube Studio) и импортируете обратно.
+        </p>
+        <p>
+          Неофициальное скачивание роликов с YouTube не используется и не поддерживается.
+        </p>
+      </section>
+
+      <section>
+        <h2>Важные ограничения</h2>
+        <ul>
+          <li>Сервис экспериментальный и не предназначен для критичных архивов.</li>
+          <li>Бессрочное или гарантированное хранение файлов на YouTube не обещается.</li>
+          <li>YouTube может сжимать, ограничивать или удалять ролики по своим правилам.</li>
+          <li>Доступ к приложению закрыт: режим single-admin без публичной регистрации.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Документы</h2>
+        <p>
+          <a href="/privacy">Политика конфиденциальности</a>
+          ·
+          <a href="/terms">Условия использования</a>
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>© A-Tex Group · A-Tex InfiDrive</p>
+      <p class="muted">Юридические реквизиты компании будут добавлены после предоставления данных.</p>
+    </footer>
+  </body>
+</html>

@@ -20,7 +20,7 @@ export function TopBar() {
     const themeType = useThemeType();
     const youtube = useYouTubeQuery();
 
-    const title = titles[location.pathname] ?? 'YTDrive';
+    const title = titles[location.pathname] ?? 'A-Tex InfiDrive';
 
     const ytLabel = useMemo(() => {
         if (!youtube.data) {

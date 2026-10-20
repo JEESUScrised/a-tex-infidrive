@@ -1,11 +1,19 @@
 export interface HealthStatus {
     status: string;
     version: string;
-    ffmpeg: boolean;
-    ffmpeg_path: string;
-    ffprobe_path: string;
-    ffmpeg_source: string;
-    ffmpeg_info: string;
+    app?: string;
+    ffmpeg?: boolean;
+    ffmpeg_path?: string;
+    ffprobe_path?: string;
+    ffmpeg_source?: string;
+    ffmpeg_info?: string;
+}
+
+export interface AuthMe {
+    authenticated: boolean;
+    auth_required: boolean;
+    username?: string;
+    app_name?: string;
 }
 
 export interface StoredFile {

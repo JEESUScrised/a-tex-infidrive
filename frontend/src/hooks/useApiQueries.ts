@@ -12,6 +12,23 @@ export function useHealthQuery() {
     });
 }
 
+export function useSystemQuery() {
+    return useQuery({
+        queryKey: queryKeys.system,
+        queryFn: api.system,
+        staleTime: 30_000,
+    });
+}
+
+export function useAuthQuery() {
+    return useQuery({
+        queryKey: queryKeys.auth,
+        queryFn: api.authMe,
+        staleTime: 60_000,
+        retry: false,
+    });
+}
+
 export function useJobsQuery() {
     return useQuery({
         queryKey: queryKeys.jobs,
@@ -45,8 +62,32 @@ export function useInvalidateAll() {
             qc.invalidateQueries({queryKey: queryKeys.jobs}),
             qc.invalidateQueries({queryKey: queryKeys.youtube}),
             qc.invalidateQueries({queryKey: queryKeys.health}),
+            qc.invalidateQueries({queryKey: queryKeys.system}),
+            qc.invalidateQueries({queryKey: queryKeys.auth}),
         ]);
     };
+}
+
+export function useLoginMutation() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: ({username, password}: {username: string; password: string}) =>
+            api.login(username, password),
+        onSuccess: async () => {
+            await qc.invalidateQueries({queryKey: queryKeys.auth});
+        },
+    });
+}
+
+export function useLogoutMutation() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: api.logout,
+        onSuccess: async () => {
+            qc.clear();
+            await qc.invalidateQueries({queryKey: queryKeys.auth});
+        },
+    });
 }
 
 export function useUploadMutation() {

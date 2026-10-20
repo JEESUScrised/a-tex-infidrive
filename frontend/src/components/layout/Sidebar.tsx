@@ -14,9 +14,9 @@ export function Sidebar() {
     return (
         <aside className="yt-sidebar">
             <Flex direction="column" gap={1} className="yt-brand">
-                <Text variant="header-2">YTDrive</Text>
+                <Text variant="header-2">InfiDrive</Text>
                 <Text color="secondary" variant="caption-2">
-                    файл ↔ MP4 ↔ YouTube
+                    A-Tex Group · файл ↔ MP4
                 </Text>
             </Flex>
             <nav className="yt-nav">

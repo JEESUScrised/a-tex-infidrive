@@ -1,5 +1,7 @@
 export const queryKeys = {
     health: ['health'] as const,
+    system: ['system'] as const,
+    auth: ['auth'] as const,
     files: ['files'] as const,
     file: (id: string) => ['files', id] as const,
     jobs: ['jobs'] as const,
