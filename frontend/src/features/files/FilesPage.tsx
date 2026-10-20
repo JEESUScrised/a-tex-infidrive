@@ -1,7 +1,7 @@
-import {Button, Flex, Loader, Table, Text, TextInput, useToaster} from '@gravity-ui/uikit';
-import {useMemo, useRef, useState} from 'react';
+import {Button, Card, Flex, Loader, Progress, Table, Text, TextInput, useToaster} from '@gravity-ui/uikit';
+import {useCallback, useMemo, useRef, useState} from 'react';
 
-import {api, driveUrls} from '@/api/endpoints';
+import {api} from '@/api/endpoints';
 import {EmptyState} from '@/components/EmptyState';
 import {ErrorAlert} from '@/components/ErrorAlert';
 import {PageHeader} from '@/components/PageHeader';
@@ -26,18 +26,58 @@ function triggerBlobDownload(blob: Blob, name: string) {
     URL.revokeObjectURL(url);
 }
 
+async function sleep(ms: number) {
+    await new Promise((r) => setTimeout(r, ms));
+}
+
 export function FilesPage() {
     const toaster = useToaster();
     const [folderId, setFolderId] = useState('');
     const [folderName, setFolderName] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [restoreId, setRestoreId] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [progress, setProgress] = useState<{percent: number; message: string} | null>(null);
     const restoreInput = useRef<HTMLInputElement>(null);
     const drive = useDriveQuery(folderId);
     const upload = useUploadMutation();
     const createFolder = useCreateFolderMutation();
     const trash = useTrashMutation();
     const share = useShareMutation();
+
+    const runRestoreJob = useCallback(
+        async (file: DriveFile) => {
+            setBusy(true);
+            setError(null);
+            setProgress({percent: 5, message: 'Подготовка файла…'});
+            try {
+                const job = await api.startRestoreJob(file.id);
+                for (;;) {
+                    const st = await api.restoreJobStatus(job.id);
+                    setProgress({percent: st.percent || 0, message: st.message || 'Обработка…'});
+                    if (st.state === 'done') {
+                        const blob = await api.restoreJobFile(job.id);
+                        triggerBlobDownload(blob, st.file_name || file.name);
+                        toaster.add({name: 'dl', title: 'Файл восстановлен', theme: 'success'});
+                        setProgress(null);
+                        return;
+                    }
+                    if (st.state === 'error') {
+                        throw new Error(st.error || 'Ошибка восстановления');
+                    }
+                    await sleep(800);
+                }
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Ошибка';
+                setError(msg);
+                toaster.add({name: 'dl', title: 'Не удалось скачать', content: msg, theme: 'danger'});
+                setProgress(null);
+            } finally {
+                setBusy(false);
+            }
+        },
+        [toaster],
+    );
 
     const columns = useMemo(
         () => [
@@ -78,28 +118,9 @@ export function FilesPage() {
                             <Button
                                 view="outlined"
                                 size="s"
-                                onClick={async () => {
-                                    try {
-                                        const response = await fetch(driveUrls.download(row.id), {
-                                            credentials: 'include',
-                                        });
-                                        if (response.status === 503) {
-                                            toaster.add({
-                                                name: 'dl',
-                                                title: 'Авто-скачивание недоступно',
-                                                content: 'Импортируйте MP4 вручную (кнопка «Из MP4»)',
-                                                theme: 'warning',
-                                            });
-                                            return;
-                                        }
-                                        if (!response.ok) {
-                                            throw new Error(await response.text());
-                                        }
-                                        triggerBlobDownload(await response.blob(), row.name);
-                                    } catch (err) {
-                                        setError(err instanceof Error ? err.message : 'Ошибка');
-                                    }
-                                }}
+                                disabled={busy}
+                                loading={busy}
+                                onClick={() => runRestoreJob(row)}
                             >
                                 Скачать
                             </Button>
@@ -148,7 +169,7 @@ export function FilesPage() {
                 },
             },
         ],
-        [share, toaster, trash],
+        [share, toaster, trash, busy, runRestoreJob],
     );
 
     const rows: Array<DriveFile | DriveFolder> = [
@@ -235,6 +256,14 @@ export function FilesPage() {
                 </Button>
             </Flex>
             <ErrorAlert message={error} />
+            {progress ? (
+                <Card view="outlined" className="yt-card">
+                    <Flex direction="column" gap={2}>
+                        <Text>{progress.message}</Text>
+                        <Progress value={progress.percent} text={`${progress.percent}%`} />
+                    </Flex>
+                </Card>
+            ) : null}
             {drive.isLoading ? (
                 <Loader size="l" />
             ) : drive.isError ? (

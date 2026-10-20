@@ -21,10 +21,12 @@ YouTube — единственное внешнее хранилище виде�
 | CAPTCHA / ToS | Обход запрещён политикой проекта |
 | Автоматическая серверная интеграция | **Не реализована как рабочий путь** |
 
-Адаптер `internal/retrieval.SSYouTube` по умолчанию возвращает `ErrUnavailable` и честную диагностику.
-Опциональный `SSYOUTUBE_API_URL` (только явно разрешённый HTTPS endpoint администратора) может быть подключён без передачи Google secrets.
+Адаптер `internal/retrieval.SSYouTube` (HTTP API) по умолчанию возвращает `ErrUnavailable`.
 
-**Рабочий fallback для эксперимента:** ручной импорт MP4 (`POST /api/drive/{id}/restore` или кнопка «Из MP4» в UI), например файл, скачанный владельцем из YouTube Studio.
+**Playwright UI-retrieval** (`browser-retriever` + `internal/retrieval.Playwright`) автоматизирует веб-интерфейс SSYouTube.
+См. подробный отчёт: [playwright-ssyoutube-experiment.md](./playwright-ssyoutube-experiment.md).
+
+**Fallback:** ручной импорт MP4 (`POST /api/drive/{id}/restore` / «Из MP4»), если CAPTCHA или worker недоступен.
 
 ## Реализовано в коде
 

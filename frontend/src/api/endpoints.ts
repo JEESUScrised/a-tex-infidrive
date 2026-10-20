@@ -82,6 +82,31 @@ export const api = {
         apiRequest<{name: string; available: boolean; message: string; automatic: boolean; manual_fallback: boolean}>(
             '/api/admin/retrieval',
         ),
+
+    startRestoreJob: (id: string) =>
+        apiRequest<RestoreJobStatus>(`/api/drive/${id}/restore-job`, {method: 'POST'}),
+
+    restoreJobStatus: (jobId: string) =>
+        apiRequest<RestoreJobStatus>(`/api/restore-jobs/${jobId}`),
+
+    restoreJobFile: async (jobId: string) => {
+        const response = await fetch(`/api/restore-jobs/${jobId}/file`, {credentials: 'include'});
+        if (!response.ok) {
+            throw new Error(await response.text());
+        }
+        return response.blob();
+    },
+};
+
+export type RestoreJobStatus = {
+    id: string;
+    file_id: string;
+    state: string;
+    stage: string;
+    percent: number;
+    message: string;
+    error?: string;
+    file_name?: string;
 };
 
 export const driveUrls = {
