@@ -8,33 +8,40 @@ import (
 	"strings"
 
 	"ytdrive/internal/codec"
+	"ytdrive/internal/ffmpeg"
 )
 
 // Config — параметры сервера. Секретов здесь нет: YouTube OAuth в этой версии не используется.
 type Config struct {
-	Addr      string
-	DataDir   string
-	WebDir    string
-	MaxUpload int64
-	Workers   int
-	QueueSize int
-	FFmpeg    string
-	FFProbe   string
-	Encode    codec.Options
+	Addr         string
+	DataDir      string
+	WebDir       string
+	MaxUpload    int64
+	Workers      int
+	QueueSize    int
+	FFmpeg       string
+	FFProbe      string
+	FFmpegSource string
+	Encode       codec.Options
 }
 
 // Load собирает конфигурацию. Уже заданные переменные окружения важнее .env.
 func Load() Config {
 	loadDotEnv(".env")
+	ffHint := firstEnv("FFMPEG_PATH", "YTDRIVE_FFMPEG")
+	fpHint := firstEnv("FFPROBE_PATH", "YTDRIVE_FFPROBE")
+	ff, fp, src := ffmpeg.Resolve(ffHint, fpHint)
+
 	cfg := Config{
-		Addr:      env("YTDRIVE_ADDR", ":8080"),
-		DataDir:   env("YTDRIVE_DATA_DIR", "data"),
-		WebDir:    env("YTDRIVE_WEB_DIR", ""),
-		MaxUpload: int64(envInt("YTDRIVE_MAX_UPLOAD_MB", 64)) << 20,
-		Workers:   envInt("YTDRIVE_WORKERS", 1),
-		QueueSize: envInt("YTDRIVE_QUEUE", 16),
-		FFmpeg:    env("YTDRIVE_FFMPEG", "ffmpeg"),
-		FFProbe:   env("YTDRIVE_FFPROBE", "ffprobe"),
+		Addr:         env("YTDRIVE_ADDR", ":8080"),
+		DataDir:      env("YTDRIVE_DATA_DIR", "data"),
+		WebDir:       env("YTDRIVE_WEB_DIR", ""),
+		MaxUpload:    int64(envInt("YTDRIVE_MAX_UPLOAD_MB", 64)) << 20,
+		Workers:      envInt("YTDRIVE_WORKERS", 1),
+		QueueSize:    envInt("YTDRIVE_QUEUE", 16),
+		FFmpeg:       ff,
+		FFProbe:      fp,
+		FFmpegSource: src,
 	}
 	cfg.Encode = codec.DefaultOptions()
 	cfg.Encode.FFmpeg = cfg.FFmpeg
@@ -73,6 +80,15 @@ func Load() Config {
 		cfg.MaxUpload = 1 << 20
 	}
 	return cfg
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func env(key, fallback string) string {

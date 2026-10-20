@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"ytdrive/internal/config"
+	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/httpapi"
 	"ytdrive/internal/jobs"
 	"ytdrive/internal/storage"
@@ -28,6 +29,11 @@ func main() {
 	if err := cfg.Encode.PrepareEncode(); err != nil {
 		log.Fatalf("параметры кодирования: %v", err)
 	}
+	log.Printf("диагностика FFmpeg: %s", ffmpeg.Diagnose(cfg.FFmpeg, cfg.FFProbe))
+	if err := ffmpeg.New(cfg.FFmpeg, cfg.FFProbe).Available(); err != nil {
+		log.Printf("предупреждение: %v — задания кодирования завершатся ошибкой", err)
+	}
+
 	store, err := storage.Open(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("хранилище: %v", err)

@@ -3,6 +3,7 @@ package codec
 import (
 	"fmt"
 
+	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/packets"
 	"ytdrive/internal/video"
 )
@@ -97,12 +98,7 @@ var presets = map[string]struct{}{
 
 // PrepareEncode проверяет параметры и подставляет путь к FFmpeg.
 func (o *Options) PrepareEncode() error {
-	if o.FFmpeg == "" {
-		o.FFmpeg = "ffmpeg"
-	}
-	if o.FFProbe == "" {
-		o.FFProbe = "ffprobe"
-	}
+	o.FFmpeg, o.FFProbe, _ = ffmpeg.Resolve(o.FFmpeg, o.FFProbe)
 	if o.Width < 64 || o.Height < 64 || o.Width > 3840 || o.Height > 2160 {
 		return fmt.Errorf("разрешение %dx%d вне диапазона", o.Width, o.Height)
 	}
@@ -152,10 +148,5 @@ func (o *Options) PrepareEncode() error {
 
 // PrepareDecode заполняет только пути к внешним утилитам.
 func (o *Options) PrepareDecode() {
-	if o.FFmpeg == "" {
-		o.FFmpeg = "ffmpeg"
-	}
-	if o.FFProbe == "" {
-		o.FFProbe = "ffprobe"
-	}
+	o.FFmpeg, o.FFProbe, _ = ffmpeg.Resolve(o.FFmpeg, o.FFProbe)
 }

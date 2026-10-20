@@ -21,7 +21,8 @@ func TestMissingFFmpeg(t *testing.T) {
 }
 
 func TestFFmpegRejectsGarbage(t *testing.T) {
-	r := New("", "")
+	ff, fp, _ := Resolve("", "")
+	r := New(ff, fp)
 	if err := r.Available(); err != nil {
 		t.Skip(err.Error())
 	}
