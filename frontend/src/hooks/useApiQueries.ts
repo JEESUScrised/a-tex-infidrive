@@ -2,7 +2,6 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 
 import {api} from '@/api/endpoints';
 import {queryKeys} from '@/hooks/queryKeys';
-import {hasActiveJobs, jobsRefetchInterval} from '@/hooks/usePolling';
 
 export function useHealthQuery() {
     return useQuery({
@@ -29,41 +28,43 @@ export function useAuthQuery() {
     });
 }
 
-export function useJobsQuery() {
+export function useDriveQuery(folderId: string) {
     return useQuery({
-        queryKey: queryKeys.jobs,
-        queryFn: api.listJobs,
-        refetchInterval: (query) => jobsRefetchInterval(query.state.data),
+        queryKey: queryKeys.drive(folderId),
+        queryFn: () => api.listDrive(folderId),
     });
 }
 
-export function useFilesQuery() {
-    const jobsQuery = useJobsQuery();
+export function useTrashQuery() {
     return useQuery({
-        queryKey: queryKeys.files,
-        queryFn: api.listFiles,
-        refetchInterval: hasActiveJobs(jobsQuery.data) ? 2000 : 10_000,
+        queryKey: queryKeys.trash,
+        queryFn: api.listTrash,
     });
 }
 
-export function useYouTubeQuery() {
+export function useSharesQuery() {
     return useQuery({
-        queryKey: queryKeys.youtube,
-        queryFn: api.youtubeStatus,
+        queryKey: queryKeys.shares,
+        queryFn: api.listShares,
+    });
+}
+
+export function useProviderQuery() {
+    return useQuery({
+        queryKey: queryKeys.provider,
+        queryFn: api.providerStatus,
         staleTime: 15_000,
     });
 }
 
-export function useInvalidateAll() {
+export function useInvalidateDrive() {
     const qc = useQueryClient();
     return async () => {
         await Promise.all([
-            qc.invalidateQueries({queryKey: queryKeys.files}),
-            qc.invalidateQueries({queryKey: queryKeys.jobs}),
-            qc.invalidateQueries({queryKey: queryKeys.youtube}),
-            qc.invalidateQueries({queryKey: queryKeys.health}),
-            qc.invalidateQueries({queryKey: queryKeys.system}),
-            qc.invalidateQueries({queryKey: queryKeys.auth}),
+            qc.invalidateQueries({queryKey: ['drive']}),
+            qc.invalidateQueries({queryKey: queryKeys.trash}),
+            qc.invalidateQueries({queryKey: queryKeys.shares}),
+            qc.invalidateQueries({queryKey: queryKeys.provider}),
         ]);
     };
 }
@@ -91,58 +92,60 @@ export function useLogoutMutation() {
 }
 
 export function useUploadMutation() {
-    const invalidate = useInvalidateAll();
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.uploadFile,
+        mutationFn: ({file, folderId}: {file: File; folderId: string}) =>
+            api.uploadFile(file, folderId),
         onSuccess: () => invalidate(),
     });
 }
 
-export function useEncodeMutation() {
-    const invalidate = useInvalidateAll();
+export function useCreateFolderMutation() {
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.encodeFile,
+        mutationFn: ({name, parentId}: {name: string; parentId: string}) =>
+            api.createFolder(name, parentId),
         onSuccess: () => invalidate(),
     });
 }
 
-export function useYouTubeUploadMutation() {
-    const invalidate = useInvalidateAll();
+export function useTrashMutation() {
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.uploadToYouTube,
+        mutationFn: api.trashFile,
         onSuccess: () => invalidate(),
     });
 }
 
-export function useRecoverMutation() {
-    const invalidate = useInvalidateAll();
+export function useRestoreMutation() {
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.recoverFromMp4,
+        mutationFn: api.restoreFile,
         onSuccess: () => invalidate(),
     });
 }
 
-export function useCancelJobMutation() {
-    const invalidate = useInvalidateAll();
+export function usePurgeMutation() {
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.cancelJob,
+        mutationFn: api.purgeFile,
         onSuccess: () => invalidate(),
     });
 }
 
-export function useYouTubeDisconnectMutation() {
-    const invalidate = useInvalidateAll();
+export function useShareMutation() {
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.youtubeDisconnect,
+        mutationFn: ({id, ttlHours, maxDownloads}: {id: string; ttlHours?: number; maxDownloads?: number}) =>
+            api.createShare(id, ttlHours ?? 0, maxDownloads ?? 0),
         onSuccess: () => invalidate(),
     });
 }
 
-export function useYouTubeAuthMutation() {
+export function useRevokeShareMutation() {
+    const invalidate = useInvalidateDrive();
     return useMutation({
-        mutationFn: api.youtubeAuthStart,
-        onSuccess: (data) => {
-            window.location.assign(data.auth_url);
-        },
+        mutationFn: api.revokeShare,
+        onSuccess: () => invalidate(),
     });
 }

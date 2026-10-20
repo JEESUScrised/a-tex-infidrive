@@ -1,5 +1,5 @@
 import {ArrowUpFromLine} from '@gravity-ui/icons';
-import {Button, Flex, Icon, Text} from '@gravity-ui/uikit';
+import {Button, Flex, Icon} from '@gravity-ui/uikit';
 import {useCallback, useRef, useState, type DragEvent} from 'react';
 
 interface Props {
@@ -44,7 +44,6 @@ export function FileUploadZone({disabled, onFiles}: Props) {
         >
             <Flex direction="column" gap={3} alignItems="center">
                 <Icon data={ArrowUpFromLine} size={24} />
-                <Text>Перетащите файл сюда или выберите через диалог</Text>
                 <Button
                     view="action"
                     disabled={disabled}

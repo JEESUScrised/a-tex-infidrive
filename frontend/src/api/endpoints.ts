@@ -1,70 +1,61 @@
 import {apiRequest} from '@/api/client';
-import type {
-    AuthMe,
-    HealthStatus,
-    Job,
-    StoredFile,
-    YouTubeFileStatus,
-    YouTubeStatus,
-} from '@/types/api';
+import type {AuthMe, HealthStatus} from '@/types/api';
+import type {DriveFile, DriveFolder, DriveListing, ProviderStatus, ShareLink} from '@/types/drive';
 
 export const api = {
     health: () => apiRequest<HealthStatus>('/api/health'),
-
     system: () => apiRequest<HealthStatus>('/api/system'),
-
     authMe: () => apiRequest<AuthMe>('/api/auth/me'),
-
     login: (username: string, password: string) =>
         apiRequest<AuthMe>('/api/auth/login', {
             method: 'POST',
             body: JSON.stringify({username, password}),
         }),
-
     logout: () => apiRequest<{status: string}>('/api/auth/logout', {method: 'POST'}),
 
-    listFiles: () => apiRequest<StoredFile[]>('/api/files'),
+    listDrive: (folderId = '') =>
+        apiRequest<DriveListing>(`/api/drive${folderId ? `?folder_id=${encodeURIComponent(folderId)}` : ''}`),
 
-    getFile: (id: string) => apiRequest<StoredFile>(`/api/files/${id}`),
+    createFolder: (name: string, parentId = '') =>
+        apiRequest<DriveFolder>('/api/drive/folders', {
+            method: 'POST',
+            body: JSON.stringify({name, parent_id: parentId}),
+        }),
 
-    uploadFile: async (file: File) => {
+    uploadFile: async (file: File, folderId = '') => {
         const form = new FormData();
         form.append('file', file);
-        return apiRequest<StoredFile>('/api/files', {method: 'POST', body: form});
+        if (folderId) {
+            form.append('folder_id', folderId);
+        }
+        return apiRequest<DriveFile>('/api/drive/upload', {method: 'POST', body: form});
     },
 
-    encodeFile: (id: string) =>
-        apiRequest<Job>(`/api/files/${id}/encode`, {method: 'POST'}),
+    trashFile: (id: string) =>
+        apiRequest<{status: string}>(`/api/drive/${id}`, {method: 'DELETE'}),
 
-    uploadToYouTube: (id: string) =>
-        apiRequest<Job>(`/api/files/${id}/youtube`, {method: 'POST'}),
+    listTrash: () => apiRequest<DriveFile[]>('/api/drive/trash'),
 
-    fileYouTubeStatus: (id: string) =>
-        apiRequest<YouTubeFileStatus>(`/api/files/${id}/youtube`),
+    restoreFile: (id: string) =>
+        apiRequest<{status: string}>(`/api/drive/trash/${id}/restore`, {method: 'POST'}),
 
-    recoverFromMp4: async (file: File) => {
-        const form = new FormData();
-        form.append('file', file);
-        return apiRequest<Job>('/api/recover', {method: 'POST', body: form});
-    },
+    purgeFile: (id: string) =>
+        apiRequest<{status: string}>(`/api/drive/trash/${id}`, {method: 'DELETE'}),
 
-    listJobs: () => apiRequest<Job[]>('/api/jobs'),
+    createShare: (id: string, ttlHours = 0, maxDownloads = 0) =>
+        apiRequest<ShareLink>(`/api/drive/${id}/share`, {
+            method: 'POST',
+            body: JSON.stringify({ttl_hours: ttlHours, max_downloads: maxDownloads}),
+        }),
 
-    getJob: (id: string) => apiRequest<Job>(`/api/jobs/${id}`),
+    listShares: () => apiRequest<ShareLink[]>('/api/drive/shares'),
 
-    cancelJob: (id: string) =>
-        apiRequest<Job>(`/api/jobs/${id}/cancel`, {method: 'POST'}),
+    revokeShare: (id: string) =>
+        apiRequest<{status: string}>(`/api/drive/shares/${id}`, {method: 'DELETE'}),
 
-    youtubeStatus: () => apiRequest<YouTubeStatus>('/api/youtube'),
-
-    youtubeAuthStart: () => apiRequest<{auth_url: string}>('/api/youtube/auth/start'),
-
-    youtubeDisconnect: () =>
-        apiRequest<{status: string}>('/api/youtube/disconnect', {method: 'POST'}),
+    providerStatus: () => apiRequest<ProviderStatus>('/api/drive/provider'),
 };
 
-export const fileUrls = {
-    original: (id: string) => `/api/files/${id}/download`,
-    video: (id: string) => `/api/files/${id}/video`,
-    jobResult: (id: string) => `/api/jobs/${id}/download`,
+export const driveUrls = {
+    download: (id: string) => `/api/drive/${id}/download`,
 };

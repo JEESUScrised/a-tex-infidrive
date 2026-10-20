@@ -2,9 +2,8 @@ export const queryKeys = {
     health: ['health'] as const,
     system: ['system'] as const,
     auth: ['auth'] as const,
-    files: ['files'] as const,
-    file: (id: string) => ['files', id] as const,
-    jobs: ['jobs'] as const,
-    job: (id: string) => ['jobs', id] as const,
-    youtube: ['youtube'] as const,
+    drive: (folderId: string) => ['drive', folderId] as const,
+    trash: ['trash'] as const,
+    shares: ['shares'] as const,
+    provider: ['provider'] as const,
 };

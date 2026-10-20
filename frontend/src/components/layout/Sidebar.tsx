@@ -1,24 +1,20 @@
-import {ArrowRotateLeft, Cloud, FolderOpen, Gear, ListCheck} from '@gravity-ui/icons';
-import {Flex, Icon, Text} from '@gravity-ui/uikit';
+import {FolderOpen, Gear, Link, TrashBin} from '@gravity-ui/icons';
+import {Icon, Text} from '@gravity-ui/uikit';
 import {NavLink} from 'react-router-dom';
 
 const items = [
-    {to: '/', end: true, label: 'Файлы', icon: FolderOpen},
-    {to: '/jobs', label: 'Задания', icon: ListCheck},
-    {to: '/recovery', label: 'Восстановление', icon: ArrowRotateLeft},
-    {to: '/youtube', label: 'YouTube', icon: Cloud},
+    {to: '/', end: true, label: 'Мои файлы', icon: FolderOpen},
+    {to: '/shares', label: 'Общие ссылки', icon: Link},
+    {to: '/trash', label: 'Корзина', icon: TrashBin},
     {to: '/settings', label: 'Настройки', icon: Gear},
 ] as const;
 
 export function Sidebar() {
     return (
         <aside className="yt-sidebar">
-            <Flex direction="column" gap={1} className="yt-brand">
+            <div className="yt-brand">
                 <Text variant="header-2">InfiDrive</Text>
-                <Text color="secondary" variant="caption-2">
-                    A-Tex Group · файл ↔ MP4
-                </Text>
-            </Flex>
+            </div>
             <nav className="yt-nav">
                 {items.map((item) => (
                     <NavLink

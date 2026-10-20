@@ -1,6 +1,6 @@
 import {Flex} from '@gravity-ui/uikit';
-import {Outlet} from 'react-router-dom';
 
+import {PageTransition} from '@/components/layout/PageTransition';
 import {Sidebar} from '@/components/layout/Sidebar';
 import {TopBar} from '@/components/layout/TopBar';
 
@@ -11,7 +11,7 @@ export function AppLayout() {
             <Flex direction="column" className="yt-main">
                 <TopBar />
                 <main className="yt-content">
-                    <Outlet />
+                    <PageTransition />
                 </main>
             </Flex>
         </div>
