@@ -38,6 +38,16 @@ type ShareLink struct {
 	Revoked        bool   `json:"revoked"`
 	CreatedAt      string `json:"created_at"`
 	FileName       string `json:"file_name,omitempty"`
+	FileSize       int64  `json:"file_size,omitempty"`
+}
+
+// PublicShareView — публичные сведения по ссылке без video_id и внутренних ключей.
+type PublicShareView struct {
+	FileName           string `json:"file_name"`
+	FileSize           int64  `json:"file_size"`
+	ExpiresAt          string `json:"expires_at,omitempty"`
+	DownloadAvailable  bool   `json:"download_available"`
+	RetrievalHint      string `json:"retrieval_hint,omitempty"`
 }
 
 // Listing — содержимое папки.

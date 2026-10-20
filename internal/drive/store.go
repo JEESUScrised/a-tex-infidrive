@@ -69,7 +69,72 @@ CREATE TABLE IF NOT EXISTS share_links (
 CREATE INDEX IF NOT EXISTS idx_drive_files_folder ON drive_files(folder_id, deleted_at);
 CREATE INDEX IF NOT EXISTS idx_share_token ON share_links(token);
 `)
+	if err != nil {
+		return err
+	}
+	for _, def := range []string{
+		"youtube_video_id TEXT NOT NULL DEFAULT ''",
+		"youtube_upload_status TEXT NOT NULL DEFAULT ''",
+		"youtube_processing_status TEXT NOT NULL DEFAULT ''",
+		"youtube_privacy_status TEXT NOT NULL DEFAULT ''",
+		"plain_sha256 TEXT NOT NULL DEFAULT ''",
+	} {
+		_, err := s.db.Exec(`ALTER TABLE drive_files ADD COLUMN ` + def)
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) SetYouTubeMeta(id, videoID, upload, processing, privacy, plainSHA string) error {
+	if !storage.ValidID(id) {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE drive_files SET youtube_video_id = ?, youtube_upload_status = ?, youtube_processing_status = ?,
+		youtube_privacy_status = ?, plain_sha256 = ?, updated_at = ? WHERE id = ?`,
+		videoID, upload, processing, privacy, plainSHA, now(), id)
 	return err
+}
+
+func (s *Store) SetStatus(id, status string) error {
+	if !storage.ValidID(id) {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE drive_files SET status = ?, updated_at = ? WHERE id = ?`, status, now(), id)
+	return err
+}
+
+func (s *Store) VideoID(id string) (string, error) {
+	if !storage.ValidID(id) {
+		return "", ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var v string
+	err := s.db.QueryRow(`SELECT youtube_video_id FROM drive_files WHERE id = ?`, id).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return v, err
+}
+
+func (s *Store) PlainSHA(id string) (string, error) {
+	if !storage.ValidID(id) {
+		return "", ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var v string
+	err := s.db.QueryRow(`SELECT COALESCE(NULLIF(plain_sha256,''), sha256) FROM drive_files WHERE id = ?`, id).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return v, err
 }
 
 func (s *Store) CreateFolder(parentID, name string) (Folder, error) {

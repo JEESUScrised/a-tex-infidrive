@@ -33,7 +33,7 @@ func TestDriveUploadDownloadShare(t *testing.T) {
 	m.Start()
 	t.Cleanup(m.Stop)
 	cfg := config.Config{MaxUpload: 1 << 20, WebDir: t.TempDir(), AppName: "A-Tex InfiDrive", AppEnv: config.EnvDevelopment}
-	srv := httptest.NewServer(NewWithDrive(st, m, cfg, nil, svc).Handler())
+	srv := httptest.NewServer(NewWithDrive(st, m, cfg, nil, svc, nil).Handler())
 	defer srv.Close()
 
 	var buf bytes.Buffer
@@ -76,7 +76,15 @@ func TestDriveUploadDownloadShare(t *testing.T) {
 	if err := json.NewDecoder(shareRes.Body).Decode(&link); err != nil {
 		t.Fatal(err)
 	}
-	pub, err := http.Get(srv.URL + "/s/" + link.Token)
+	shareMeta, err := http.Get(srv.URL + "/api/public/share/" + link.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shareMeta.Body.Close()
+	if shareMeta.StatusCode != http.StatusOK {
+		t.Fatalf("share meta %d", shareMeta.StatusCode)
+	}
+	pub, err := http.Get(srv.URL + "/s/" + link.Token + "/download")
 	if err != nil {
 		t.Fatal(err)
 	}

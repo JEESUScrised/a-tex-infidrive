@@ -30,14 +30,14 @@ func NewService(meta *Store, blobs blobstore.StorageProvider, publicURL string, 
 
 func (s *Service) ProviderName() string {
 	if s.blobs == nil {
-		return ""
+		return "youtube_experimental"
 	}
 	return s.blobs.Name()
 }
 
 func (s *Service) ProviderAvailable(ctx context.Context) error {
 	if s.blobs == nil {
-		return blobstore.ErrNotConfigured
+		return nil // метаданные-only; байты через YouTube pipeline
 	}
 	return s.blobs.Available(ctx)
 }
@@ -168,6 +168,46 @@ func (s *Service) ListShares() ([]ShareLink, error) {
 }
 
 func (s *Service) RevokeShare(id string) error { return s.meta.RevokeShare(id) }
+
+// PeekShareMeta проверяет ссылку и возвращает имя/размер без чтения байтов и без счётчика скачиваний.
+func (s *Service) PeekShareMeta(token string) (ShareLink, error) {
+	link, err := s.meta.GetShareByToken(token)
+	if err != nil {
+		return ShareLink{}, err
+	}
+	if link.Revoked {
+		return ShareLink{}, ErrDenied
+	}
+	if link.ExpiresAt != "" {
+		exp, err := time.Parse(time.RFC3339, link.ExpiresAt)
+		if err == nil && time.Now().After(exp) {
+			return ShareLink{}, ErrDenied
+		}
+	}
+	if link.MaxDownloads > 0 && link.DownloadCount >= link.MaxDownloads {
+		return ShareLink{}, ErrDenied
+	}
+	f, err := s.meta.GetFile(link.FileID)
+	if err != nil {
+		return ShareLink{}, err
+	}
+	if f.DeletedAt != "" {
+		return ShareLink{}, ErrNotFound
+	}
+	link.FileName = f.Name
+	link.FileSize = f.Size
+	return link, nil
+}
+
+// OpenShareMeta — Peek + учёт попытки скачивания (для restore/download path).
+func (s *Service) OpenShareMeta(token string) (ShareLink, error) {
+	link, err := s.PeekShareMeta(token)
+	if err != nil {
+		return ShareLink{}, err
+	}
+	_ = s.meta.IncShareDownload(link.ID)
+	return link, nil
+}
 
 func (s *Service) OpenShare(ctx context.Context, token string) (io.ReadCloser, File, ShareLink, error) {
 	link, err := s.meta.GetShareByToken(token)

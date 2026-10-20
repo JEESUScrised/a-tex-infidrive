@@ -17,6 +17,7 @@ import (
 	"ytdrive/internal/drive"
 	"ytdrive/internal/ffmpeg"
 	"ytdrive/internal/jobs"
+	"ytdrive/internal/pipeline"
 	"ytdrive/internal/storage"
 	"ytdrive/internal/youtube"
 )
@@ -30,6 +31,7 @@ type Server struct {
 	cfg      config.Config
 	youtube  youtube.VideoStorageProvider
 	drive    *drive.Service
+	pipeline *pipeline.Service
 	web      http.Handler
 	sessions *auth.Manager
 	limiter  *auth.LoginLimiter
@@ -37,23 +39,24 @@ type Server struct {
 
 // New собирает HTTP-обработчик. Каталог данных не публикуется.
 func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider) *Server {
-	return NewWithDrive(store, manager, cfg, yt, nil)
+	return NewWithDrive(store, manager, cfg, yt, nil, nil)
 }
 
-// NewWithDrive — полный конструктор с облачным диском.
-func NewWithDrive(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider, driveSvc *drive.Service) *Server {
+// NewWithDrive — полный конструктор с облачным диском и optional YouTube pipeline.
+func NewWithDrive(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider, driveSvc *drive.Service, pipe *pipeline.Service) *Server {
 	web := resolveWebDir(cfg.WebDir)
 	if yt == nil {
 		yt = youtube.Unconfigured{}
 	}
 	s := &Server{
-		store:   store,
-		jobs:    manager,
-		cfg:     cfg,
-		youtube: yt,
-		drive:   driveSvc,
-		web:     spaFileServer(web),
-		limiter: auth.NewLoginLimiter(10, 15*time.Minute),
+		store:    store,
+		jobs:     manager,
+		cfg:      cfg,
+		youtube:  yt,
+		drive:    driveSvc,
+		pipeline: pipe,
+		web:      spaFileServer(web),
+		limiter:  auth.NewLoginLimiter(10, 15*time.Minute),
 	}
 	if cfg.AuthEnabled {
 		secret := cfg.SessionSecret
@@ -75,13 +78,23 @@ func (s *Server) Handler() http.Handler {
 			s.handleAPI(w, r)
 			return
 		}
-		// Публичная share-ссылка без авторизации.
+		// Публичное скачивание: /s/{token}/download (лендинг /s/{token} — SPA).
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/s/") {
-			token := strings.TrimPrefix(r.URL.Path, "/s/")
-			token = strings.Trim(token, "/")
-			if token != "" && !strings.Contains(token, "/") {
-				s.publicShareDownload(w, r, token)
-				return
+			rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/s/"), "/")
+			if strings.HasSuffix(rest, "/download") {
+				token := strings.TrimSuffix(rest, "/download")
+				token = strings.Trim(token, "/")
+				if token != "" && !strings.Contains(token, "/") {
+					s.publicShareDownload(w, r, token)
+					return
+				}
+			}
+			if r.URL.Query().Get("download") == "1" {
+				token := rest
+				if token != "" && !strings.Contains(token, "/") {
+					s.publicShareDownload(w, r, token)
+					return
+				}
 			}
 		}
 		s.web.ServeHTTP(w, r)
@@ -109,6 +122,9 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && path == "auth/login":
 		s.authLogin(w, r)
 		return
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "public" && parts[1] == "share":
+		s.publicShareMeta(w, r, parts[2])
+		return
 	case r.Method == http.MethodGet && path == "youtube/callback":
 		// OAuth redirect: session обязательна, CSRF не требуется (top-level GET).
 		if !s.requireAuthSession(w, r) {
@@ -127,6 +143,9 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.handlePipeline(w, r, path, parts) {
+		return
+	}
 	if s.handleDrive(w, r, path, parts) {
 		return
 	}

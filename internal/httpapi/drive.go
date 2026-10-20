@@ -186,7 +186,51 @@ func (s *Server) driveShare(w http.ResponseWriter, r *http.Request, id string) {
 	writeJSON(w, http.StatusCreated, link)
 }
 
+func (s *Server) publicShareMeta(w http.ResponseWriter, r *http.Request, token string) {
+	if s.drive == nil {
+		writeError(w, http.StatusNotFound, "не найдено")
+		return
+	}
+	link, err := s.drive.PeekShareMeta(token)
+	if err != nil {
+		writeDriveError(w, err)
+		return
+	}
+	view := drive.PublicShareView{
+		FileName: link.FileName,
+		FileSize: link.FileSize,
+		ExpiresAt: link.ExpiresAt,
+	}
+	if s.pipeline != nil && s.cfg.ExperimentalYouTubeStore {
+		meta := s.pipeline.RetrieverMeta(r.Context())
+		view.DownloadAvailable = meta.Available && meta.Automatic
+		if !view.DownloadAvailable {
+			view.RetrievalHint = "Автоматическое восстановление недоступно"
+		}
+	} else {
+		view.DownloadAvailable = true
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (s *Server) publicShareDownload(w http.ResponseWriter, r *http.Request, token string) {
+	if s.pipeline != nil && s.cfg.ExperimentalYouTubeStore {
+		link, err := s.drive.OpenShareMeta(token)
+		if err != nil {
+			writeDriveError(w, err)
+			return
+		}
+		name, data, err := s.pipeline.Download(r.Context(), link.FileID)
+		if err != nil {
+			writePipelineError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", storage.SanitizeName(name)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
+	}
 	if s.drive == nil {
 		writeError(w, http.StatusNotFound, "не найдено")
 		return
