@@ -8,7 +8,7 @@ cmd/server   ─┼─► internal/codec ─► internal/packets
               │                  └─► internal/video ─► internal/ffmpeg
               ├─► internal/jobs ─► internal/storage (SQLite + файлы)
               └─► internal/httpapi ─► web/
-internal/youtube — интерфейс будущей официальной загрузки, без реализации
+internal/youtube — OAuth 2.0 и YouTube Data API v3 (videos.insert, статус, канал)
 ```
 
 ## Поток кодирования
@@ -46,7 +46,7 @@ internal/youtube — интерфейс будущей официальной з
 
 ## YouTube
 
-`VideoStorageProvider` описывает загрузку и проверку статуса. Реализация `Unconfigured` всегда возвращает ошибку. Кнопки «успешно загружено на YouTube» в интерфейсе нет: страница прямо пишет, что функция не настроена.
+`VideoStorageProvider` реализован пакетом `Service` (OAuth + Data API) либо `Unconfigured`, если нет клиентских секретов. Загрузка идёт фоновым заданием `youtube_upload` с отдельными статусами (`uploading`…`completed`), прогресс считается по байтам, не по кадрам. Токены лежат в SQLite таблице `oauth_tokens` внутри каталога данных.
 
 Дальше по этому интерфейсу можно добавить OAuth 2.0 и resumable upload YouTube Data API v3. Скачивание чужого ролика в обход API в проект не входит.
 

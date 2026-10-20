@@ -4,7 +4,7 @@
 
 Идея близка к [yt-media-storage](https://github.com/PulseBeat02/yt-media-storage) (GPL-3.0): данные режутся на пакеты, пакеты проверяются контрольной суммой и рисуются блоками кадра. Код YTDrive написан заново. Оригинал рассчитан на lossless FFV1 и fountain codes. Здесь свой формат **YTDrive v1**: один бит на блок 16×16, бит читается по средней яркости, избыточность — повтор пакетов и XOR.
 
-Неофициальное скачивание с YouTube не реализовано и не планируется. В `internal/youtube` оставлен интерфейс будущей загрузки через официальный YouTube Data API.
+Загрузка на YouTube — через официальный YouTube Data API v3 и OAuth 2.0 (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`). Неофициальное скачивание роликов не реализуется. После публикации скачайте своё видео в YouTube Studio и импортируйте MP4 в YTDrive. Подробности: `docs/youtube-integration.md`.
 
 ## Зависимости
 
@@ -116,9 +116,14 @@ ytdrive verify --original file.zip --restored restored.zip
 - `POST /api/jobs/{id}/cancel`
 - `GET /api/jobs/{id}/download`
 - `POST /api/recover` — multipart-поле `file` с MP4
-- `GET /api/youtube` — загрузка не настроена
+- `GET /api/youtube` — статус OAuth и канал
+- `GET /api/youtube/auth/start` — URL авторизации Google
+- `GET /api/youtube/callback` — OAuth redirect
+- `POST /api/youtube/disconnect`
+- `POST /api/files/{id}/youtube` — очередь загрузки MP4
+- `GET /api/files/{id}/youtube` — video_id и статусы
 
-Число одновременных процессов FFmpeg ограничено `YTDRIVE_WORKERS` (по умолчанию 1). Очередь — `YTDRIVE_QUEUE`.
+Число одновременных процессов FFmpeg / загрузок ограничено `YTDRIVE_WORKERS` (по умолчанию 1). Очередь — `YTDRIVE_QUEUE`.
 
 ## Конфигурация
 
@@ -139,6 +144,7 @@ go test -race ./...
 
 - В кадре 720p помещается 400 байт полезных данных. Большой файл даёт длинное видео.
 - Устойчивость к повторному сжатию H.264 подтверждена тестами для CRF 23, CRF 28 и масштаба 640×360 на коротких роликах с настройками по умолчанию. Это не гарантия для любого ролика после YouTube.
-- Загрузка на YouTube в этой версии не реализована.
+- Без `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` кнопка загрузки на YouTube не активна (провайдер `Unconfigured`).
+- `go test -race` на Windows без GCC не запускается: установите MinGW/LLVM или проверьте в WSL (`sudo apt install gcc` и `go test -race ./...`).
 
-Описание байтов — в `docs/file-format.md`, архитектура — в `docs/architecture.md`.
+Описание байтов — в `docs/file-format.md`, архитектура — в `docs/architecture.md`, YouTube — в `docs/youtube-integration.md`.

@@ -27,11 +27,11 @@ func newTestServer(t *testing.T, max int64) *httptest.Server {
 	opt.FrameRepeat = 1
 	opt.PacketRepeat = 1
 	opt.Preset = "ultrafast"
-	m := jobs.New(st, opt, 1, 2)
+	m := jobs.New(st, opt, 1, 2, nil)
 	m.Start()
 	t.Cleanup(m.Stop)
 	cfg := config.Config{MaxUpload: max, FFmpeg: "ffmpeg", FFProbe: "ffprobe", WebDir: t.TempDir()}
-	return httptest.NewServer(New(st, m, cfg).Handler())
+	return httptest.NewServer(New(st, m, cfg, nil).Handler())
 }
 
 func TestHealthUploadAndMissing(t *testing.T) {

@@ -55,6 +55,8 @@ th, td {
 .hash { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; }
 .error { color: #a32020; min-height: 1.2em; }
 .ok { color: #0d6b3a; }
+.hint { color: #5b6775; font-size: 13px; margin-top: 8px; }
+#youtube-actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
 .progress {
   height: 8px;
   background: #e6ebf1;

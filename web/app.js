@@ -2,8 +2,13 @@ const filesBody = document.querySelector("#files");
 const jobsBody = document.querySelector("#jobs");
 const health = document.querySelector("#health");
 const youtube = document.querySelector("#youtube");
+const youtubeChannel = document.querySelector("#youtube-channel");
+const youtubeActions = document.querySelector("#youtube-actions");
+const youtubeError = document.querySelector("#youtube-error");
 const uploadError = document.querySelector("#upload-error");
 const recoverError = document.querySelector("#recover-error");
+
+let youtubeState = { enabled: false, connected: false };
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -28,6 +33,18 @@ function sizeText(n) {
   return (n / 1024 / 1024).toFixed(1) + " МБ";
 }
 
+function jobKindLabel(kind) {
+  if (kind === "encode") return "кодирование";
+  if (kind === "decode") return "восстановление";
+  if (kind === "youtube_upload") return "YouTube";
+  return kind;
+}
+
+function canCancel(status) {
+  return status === "queued" || status === "running" || status === "uploading" ||
+    status === "uploaded" || status === "processing";
+}
+
 async function refreshHealth() {
   try {
     const data = await api("/api/health");
@@ -39,12 +56,58 @@ async function refreshHealth() {
       health.textContent = "Сервер работает, но FFmpeg не найден. Кодирование завершится ошибкой.";
       health.className = "error";
     }
-    const yt = await api("/api/youtube");
-    youtube.textContent = yt.message;
+    await refreshYouTube();
   } catch (err) {
     health.textContent = "Нет связи с сервером: " + err.message;
     health.className = "error";
   }
+}
+
+async function refreshYouTube() {
+  youtubeError.textContent = "";
+  const yt = await api("/api/youtube");
+  youtubeState = yt;
+  youtube.textContent = yt.message || "";
+  youtubeChannel.textContent = "";
+  youtubeActions.replaceChildren();
+  if (yt.channel && yt.channel.title) {
+    youtubeChannel.textContent = "Канал: " + yt.channel.title;
+  }
+  if (!yt.enabled) {
+    return;
+  }
+  if (!yt.connected) {
+    const connect = document.createElement("button");
+    connect.type = "button";
+    connect.textContent = "Подключить Google";
+    connect.addEventListener("click", async () => {
+      connect.disabled = true;
+      try {
+        const data = await api("/api/youtube/auth/start");
+        window.location.href = data.auth_url;
+      } catch (err) {
+        youtubeError.textContent = err.message;
+        connect.disabled = false;
+      }
+    });
+    youtubeActions.append(connect);
+    return;
+  }
+  const disconnect = document.createElement("button");
+  disconnect.type = "button";
+  disconnect.textContent = "Отключить аккаунт";
+  disconnect.addEventListener("click", async () => {
+    disconnect.disabled = true;
+    try {
+      await api("/api/youtube/disconnect", { method: "POST" });
+      await refreshYouTube();
+      await refreshFiles();
+    } catch (err) {
+      youtubeError.textContent = err.message;
+      disconnect.disabled = false;
+    }
+  });
+  youtubeActions.append(disconnect);
 }
 
 async function refreshFiles() {
@@ -84,6 +147,44 @@ async function refreshFiles() {
       video.href = "/api/files/" + file.id + "/video";
       video.textContent = "mp4";
       actions.append(document.createTextNode(" "), video);
+      if (youtubeState.enabled && youtubeState.connected && !file.youtube_video_id) {
+        const upload = document.createElement("button");
+        upload.type = "button";
+        upload.textContent = "Загрузить на YouTube";
+        upload.addEventListener("click", async () => {
+          upload.disabled = true;
+          uploadError.textContent = "";
+          try {
+            await api("/api/files/" + file.id + "/youtube", { method: "POST" });
+            await refreshJobs();
+          } catch (err) {
+            uploadError.textContent = err.message;
+          } finally {
+            upload.disabled = false;
+          }
+        });
+        actions.append(document.createTextNode(" "), upload);
+      }
+      if (file.youtube_url) {
+        const link = document.createElement("a");
+        link.href = file.youtube_url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "YouTube";
+        actions.append(document.createTextNode(" "), link);
+        if (file.youtube_processing_status || file.youtube_upload_status) {
+          const st = document.createElement("span");
+          st.textContent = " [" + (file.youtube_processing_status || file.youtube_upload_status) +
+            (file.youtube_privacy_status ? ", " + file.youtube_privacy_status : "") + "]";
+          actions.append(st);
+        }
+      }
+      if (file.youtube_error) {
+        const err = document.createElement("span");
+        err.className = "error";
+        err.textContent = " " + file.youtube_error;
+        actions.append(err);
+      }
     }
     tr.append(name, size, hash, actions);
     filesBody.append(tr);
@@ -108,7 +209,7 @@ async function refreshJobs() {
   for (const job of jobs) {
     const tr = document.createElement("tr");
     const kind = document.createElement("td");
-    kind.textContent = job.kind === "encode" ? "кодирование" : "восстановление";
+    kind.textContent = jobKindLabel(job.kind);
     const status = document.createElement("td");
     status.textContent = job.status;
     const progress = document.createElement("td");
@@ -117,7 +218,7 @@ async function refreshJobs() {
     message.textContent = job.error || job.message || "";
     if (job.error) message.className = "error";
     const actions = document.createElement("td");
-    if (job.status === "queued" || job.status === "running") {
+    if (canCancel(job.status)) {
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.textContent = "отмена";
@@ -183,6 +284,11 @@ async function tick() {
   } catch (err) {
     uploadError.textContent = err.message;
   }
+}
+
+const params = new URLSearchParams(window.location.search);
+if (params.get("youtube_error")) {
+  youtubeError.textContent = params.get("youtube_error");
 }
 
 refreshHealth();

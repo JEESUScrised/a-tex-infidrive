@@ -63,6 +63,26 @@ FFmpeg ищется через `ffmpeg.Resolve`: флаги и переменн�
 
 `go test -race ./...` на этой машине не выполнился: нужен CGO и компилятор C. Это ограничение среды.
 
+Для race на Windows: установите MinGW-w64 или LLVM и добавьте `gcc` в PATH, затем `set CGO_ENABLED=1` и `go test -race ./...`. В WSL: `sudo apt install gcc` и тот же `go test -race ./...`.
+
+## YouTube (этап интеграции)
+
+Mock / FakeProvider (без реального Google-аккаунта):
+
+| Проверка | Статус |
+| --- | --- |
+| OAuth state CSRF и запрет replay | PASS |
+| Exchange code → сохранение refresh/access | PASS |
+| Disconnect удаляет токены | PASS |
+| mapAPIError 401/403 quota/503 | PASS |
+| Job youtube_upload + video_id + private | PASS |
+| Повторная загрузка того же файла | PASS (conflict) |
+| FailInterruptedJobs после «зависания» | PASS |
+| Миграция `youtube_*` и oauth_tokens | PASS |
+| Studio recovery (lossy → decode) | PASS |
+
+Реальный upload на аккаунт пользователя в CI/агенте **не выполнялся**: секреты OAuth в репозиторий не кладутся. После заполнения `.env` проверьте вручную по `docs/youtube-integration.md`.
+
 ## Что повторное сжатие не доказывает
 
 Успех CRF 23/28 и 640×360 получен на коротких роликах с плоскими блоками 16×16 и избыточностью по умолчанию. Сильное размытие или длинный GOP на стороне YouTube по-прежнему могут уничтожить бит. Тогда кадр пропускается или файл не публикуется, если SHA-256 не сошёлся.

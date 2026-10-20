@@ -30,16 +30,19 @@ type Server struct {
 }
 
 // New собирает HTTP-обработчик. Каталог данных не публикуется.
-func New(store *storage.Store, manager *jobs.Manager, cfg config.Config) *Server {
+func New(store *storage.Store, manager *jobs.Manager, cfg config.Config, yt youtube.VideoStorageProvider) *Server {
 	web := cfg.WebDir
 	if web == "" {
 		web = "web"
+	}
+	if yt == nil {
+		yt = youtube.Unconfigured{}
 	}
 	return &Server{
 		store:   store,
 		jobs:    manager,
 		cfg:     cfg,
-		youtube: youtube.Unconfigured{},
+		youtube: yt,
 		web:     http.FileServer(http.Dir(web)),
 	}
 }
@@ -68,6 +71,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.health(w, r)
 	case r.Method == http.MethodGet && path == "youtube":
 		s.youtubeStatus(w, r)
+	case r.Method == http.MethodGet && path == "youtube/auth/start":
+		s.youtubeAuthStart(w, r)
+	case r.Method == http.MethodGet && path == "youtube/callback":
+		s.youtubeAuthCallback(w, r)
+	case r.Method == http.MethodPost && path == "youtube/disconnect":
+		s.youtubeDisconnect(w, r)
 	case r.Method == http.MethodPost && path == "files":
 		s.upload(w, r)
 	case r.Method == http.MethodGet && path == "files":
@@ -76,6 +85,10 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.getFile(w, r, parts[1])
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "files" && parts[2] == "encode":
 		s.encode(w, r, parts[1])
+	case r.Method == http.MethodPost && len(parts) == 3 && parts[0] == "files" && parts[2] == "youtube":
+		s.youtubeUpload(w, r, parts[1])
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "files" && parts[2] == "youtube":
+		s.youtubeFileStatus(w, r, parts[1])
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "files" && parts[2] == "download":
 		s.downloadOriginal(w, r, parts[1])
 	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "files" && parts[2] == "video":
@@ -106,14 +119,6 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 		"ffprobe_path":  s.cfg.FFProbe,
 		"ffmpeg_source": s.cfg.FFmpegSource,
 		"ffmpeg_info":   ffmpeg.Diagnose(s.cfg.FFmpeg, s.cfg.FFProbe),
-	})
-}
-
-func (s *Server) youtubeStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":  false,
-		"provider": "unconfigured",
-		"message":  youtube.ErrNotConfigured.Error(),
 	})
 }
 

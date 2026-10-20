@@ -45,6 +45,7 @@
         <button type="submit">Восстановить</button>
       </form>
       <p id="recover-error" class="error"></p>
+      <p class="hint">Официальный YouTube API не отдаёт видеопоток. После загрузки на YouTube скачайте свой ролик в YouTube Studio и импортируйте его сюда.</p>
     </section>
 
     <section>
@@ -65,7 +66,12 @@
 
     <section>
       <h2>YouTube</h2>
-      <p id="youtube">Загрузка на YouTube в этой версии не реализована.</p>
+      <div id="youtube-panel">
+        <p id="youtube">проверка…</p>
+        <p id="youtube-channel"></p>
+        <div id="youtube-actions"></div>
+        <p id="youtube-error" class="error"></p>
+      </div>
     </section>
   </main>
   <script src="app.js"></script>
