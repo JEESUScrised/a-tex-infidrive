@@ -91,6 +91,7 @@ func DefaultOptions() Options {
 // DefaultOptionsV2 — плотный экспериментальный профиль (~1–2 МБ/мин полезных данных).
 // Измерено (crypto/rand): 1 МиБ → ~30 с / ~8.5 МиБ MP4 (CRF 23); 5 МиБ → ~151 с / ~42 МиБ.
 // PacketRepeat=2 чуть снижает плотность, но повышает устойчивость encrypted/high-entropy payload.
+// Studio Download отдаёт 720p: декодер проецирует сетку 240×135 на фактический кадр.
 func DefaultOptionsV2() Options {
 	return Options{
 		Width:         1920,
@@ -109,6 +110,30 @@ func DefaultOptionsV2() Options {
 		FFmpeg:        "ffmpeg",
 		FFProbe:       "ffprobe",
 		FormatVersion: format.Version2,
+	}
+}
+
+// DefaultOptionsV3 — нативные 1280×720 под YouTube Studio Download.
+// Block 8: баланс плотности и запаса к H.264; FR=2/PR=2 для устойчивости после recompress.
+// PayloadCap(720p/b8)=1740 → ChunkSize=1704. Block 12 не делится на 1280×720.
+func DefaultOptionsV3() Options {
+	return Options{
+		Width:         1280,
+		Height:        720,
+		Block:         8,
+		FPS:           10,
+		CRF:           18,
+		Preset:        "veryfast",
+		GOP:           1,
+		FrameRepeat:   2,
+		PacketRepeat:  2,
+		ParityGroup:   8,
+		ChunkSize:     1704,
+		Luma0:         16,
+		Luma1:         235,
+		FFmpeg:        "ffmpeg",
+		FFProbe:       "ffprobe",
+		FormatVersion: format.Version3,
 	}
 }
 

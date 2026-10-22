@@ -86,6 +86,11 @@ type Config struct {
 	BrowserRetrieverTemp string // tmpfs on VPS, e.g. /dev/shm/infidrive
 	BrowserRetrieverTimeoutSec int
 	BrowserRetrieverHeadless   bool
+
+	// YouTube Studio owner-download (Playwright persistent profile, manual first login).
+	StudioRetrieverJS   string
+	StudioBrowserProfile string
+	StudioRetrieverHeadless bool
 }
 
 // Load собирает конфигурацию. Уже заданные переменные окружения важнее .env.
@@ -168,6 +173,9 @@ func Load() (Config, error) {
 		BrowserRetrieverTemp: firstEnv("BROWSER_RETRIEVER_TEMP", ""),
 		BrowserRetrieverTimeoutSec: firstEnvInt([]string{"BROWSER_RETRIEVER_TIMEOUT_SEC"}, 180),
 		BrowserRetrieverHeadless:   envBool("BROWSER_RETRIEVER_HEADLESS", true),
+		StudioRetrieverJS:          firstEnv("STUDIO_RETRIEVER_JS", ""),
+		StudioBrowserProfile:       firstEnv("STUDIO_BROWSER_PROFILE", ""),
+		StudioRetrieverHeadless:    envBool("STUDIO_RETRIEVER_HEADLESS", true),
 	}
 	if v := firstEnvInt([]string{"MAX_UPLOAD_MIB", "MAX_UPLOAD_MB"}, 0); v > 0 {
 		cfg.MaxUpload = int64(v) << 20
@@ -212,7 +220,7 @@ func Load() (Config, error) {
 	cfg.CookieSecure = cfg.AppEnv == EnvProduction || strings.HasPrefix(cfg.PublicURL, "https://")
 
 	if cfg.ExperimentalYouTubeStore {
-		cfg.Encode = codec.DefaultOptionsV2()
+		cfg.Encode = codec.DefaultOptionsV3()
 	} else {
 		cfg.Encode = codec.DefaultOptions()
 	}

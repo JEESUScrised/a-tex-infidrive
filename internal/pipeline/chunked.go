@@ -40,13 +40,13 @@ func (s *Service) UploadChunkedStream(ctx context.Context, folderID, name, mime 
 		return drive.File{}, storage.ErrTooLarge
 	}
 
-	codecVer := int(format.Version2)
 	encOpt := s.cfg.Encode
 	if encOpt.FormatVersion == 0 {
-		encOpt = codec.DefaultOptionsV2()
+		encOpt = codec.DefaultOptionsV3()
 	}
-	if encOpt.FormatVersion == format.Version2 {
-		codecVer = 2
+	codecVer := int(encOpt.FormatVersion)
+	if codecVer < 1 {
+		codecVer = int(format.Version3)
 	}
 
 	// Предварительно создаём карточку файла (байты ещё не готовы).

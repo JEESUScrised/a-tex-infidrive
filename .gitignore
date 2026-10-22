@@ -1,15 +1,85 @@
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.pem
+*.key
+
+# Go binaries / caches
+/bin/
+/bin-*/
+*.exe
+*.dll
+*.test
+*.out
+cover.out
+go.work.sum
+
+# Release artifacts / archives
+/_release_stage/
+/_release_v3/
+_rel*/
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# Data / databases / user files
 /data/
 /data-*/
-/bin/
-/frontend/node_modules/
-/frontend/dist/
-/tools/
-/.tools/
-*.exe
-*.mp4
-*.partial
-*.partial.mp4
-.env
-.DS_Store
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Temporary / logs / benchmarks
+/tmp/
+/tools/
+/.tools/
+*.log
+*.partial
+*.tmp
+*.bak
+coverage.*
+tmp-*
+crash*.log
+
+# Video / benchmark artefacts
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+
+# Node / frontend build
+/frontend/node_modules/
+/frontend/dist/
+/web-dist/
+node_modules/
+
+# Playwright / browser profiles & auth state (NEVER commit)
+browser-retriever/node_modules/
+browser-retriever/.studio-profile/
+browser-retriever/.playwright/
+browser-retriever/*profile*/
+browser-retriever/tmp-out/
+.playwright/
+.ms-playwright/
+storage-state.json
+auth-state.json
+cookies.json
+**/Cookies

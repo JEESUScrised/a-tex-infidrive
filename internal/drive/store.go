@@ -81,6 +81,7 @@ CREATE INDEX IF NOT EXISTS idx_share_token ON share_links(token);
 		"chunk_total INTEGER NOT NULL DEFAULT 1",
 		"codec_version INTEGER NOT NULL DEFAULT 1",
 		"manifest_complete INTEGER NOT NULL DEFAULT 0",
+		"recovery_status TEXT NOT NULL DEFAULT 'pending'",
 	} {
 		_, err := s.db.Exec(`ALTER TABLE drive_files ADD COLUMN ` + def)
 		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
@@ -109,6 +110,18 @@ func (s *Store) SetStatus(id, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE drive_files SET status = ?, updated_at = ? WHERE id = ?`, status, now(), id)
+	return err
+}
+
+// SetRecoveryStatus: pending | available | verified | failed.
+// ready в status означает «загружен и доступен для попытки восстановления», не «SHA проверен».
+func (s *Store) SetRecoveryStatus(id, recovery string) error {
+	if !storage.ValidID(id) {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE drive_files SET recovery_status = ?, updated_at = ? WHERE id = ?`, recovery, now(), id)
 	return err
 }
 
@@ -232,7 +245,7 @@ func (s *Store) FinalizeFile(id string, size int64, sha256 string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`UPDATE drive_files SET size = ?, sha256 = ?, status = 'ready', updated_at = ? WHERE id = ? AND deleted_at = ''`,
+	res, err := s.db.Exec(`UPDATE drive_files SET size = ?, sha256 = ?, status = 'ready', recovery_status = 'available', updated_at = ? WHERE id = ? AND deleted_at = ''`,
 		size, sha256, now(), id)
 	if err != nil {
 		return err
@@ -261,8 +274,8 @@ func (s *Store) GetFile(id string) (File, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	row := s.db.QueryRow(`SELECT id, folder_id, name, mime, size, sha256, provider, object_key, status, created_at, updated_at, deleted_at
-		FROM drive_files WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, folder_id, name, mime, size, sha256, provider, object_key, status, created_at, updated_at, deleted_at,
+		COALESCE(recovery_status,'pending') FROM drive_files WHERE id = ?`, id)
 	return scanFile(row)
 }
 
@@ -272,11 +285,11 @@ func (s *Store) ListFiles(folderID string, trash bool) ([]File, error) {
 	var rows *sql.Rows
 	var err error
 	if trash {
-		rows, err = s.db.Query(`SELECT id, folder_id, name, mime, size, sha256, provider, object_key, status, created_at, updated_at, deleted_at
-			FROM drive_files WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT 500`)
+		rows, err = s.db.Query(`SELECT id, folder_id, name, mime, size, sha256, provider, object_key, status, created_at, updated_at, deleted_at,
+			COALESCE(recovery_status,'pending') FROM drive_files WHERE deleted_at != '' ORDER BY deleted_at DESC LIMIT 500`)
 	} else {
-		rows, err = s.db.Query(`SELECT id, folder_id, name, mime, size, sha256, provider, object_key, status, created_at, updated_at, deleted_at
-			FROM drive_files WHERE folder_id = ? AND deleted_at = '' AND status = 'ready' ORDER BY name LIMIT 500`, folderID)
+		rows, err = s.db.Query(`SELECT id, folder_id, name, mime, size, sha256, provider, object_key, status, created_at, updated_at, deleted_at,
+			COALESCE(recovery_status,'pending') FROM drive_files WHERE folder_id = ? AND deleted_at = '' AND status = 'ready' ORDER BY name LIMIT 500`, folderID)
 	}
 	if err != nil {
 		return nil, err
@@ -464,7 +477,7 @@ type scanner interface {
 
 func scanFile(row scanner) (File, error) {
 	var f File
-	err := row.Scan(&f.ID, &f.FolderID, &f.Name, &f.MIME, &f.Size, &f.SHA256, &f.Provider, &f.ObjectKey, &f.Status, &f.CreatedAt, &f.UpdatedAt, &f.DeletedAt)
+	err := row.Scan(&f.ID, &f.FolderID, &f.Name, &f.MIME, &f.Size, &f.SHA256, &f.Provider, &f.ObjectKey, &f.Status, &f.CreatedAt, &f.UpdatedAt, &f.DeletedAt, &f.RecoveryStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return File{}, ErrNotFound
 	}

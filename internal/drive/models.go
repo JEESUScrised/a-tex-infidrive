@@ -14,8 +14,9 @@ type File struct {
 	ObjectKey    string `json:"-"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
-	DeletedAt    string `json:"deleted_at,omitempty"`
-	Status       string `json:"status"` // uploading | ready | error
+	DeletedAt       string `json:"deleted_at,omitempty"`
+	Status          string `json:"status"` // uploading | processing | ready | error — ready ≠ восстановление проверено
+	RecoveryStatus  string `json:"recovery_status,omitempty"` // pending | available | verified | failed
 }
 
 // Folder — папка в дереве пользователя.

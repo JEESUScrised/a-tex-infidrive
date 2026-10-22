@@ -13,9 +13,13 @@ const Version byte = 1
 // Раскладка бит/блок та же (PixelLuma1); отличается геометрией и FEC-параметрами в заголовке.
 const Version2 byte = 2
 
+// Version3 — Studio-ориентированный профиль (нативные 1280×720).
+// Та же раскладка PixelLuma1; геометрия совпадает с официальным Download YouTube Studio (720p/360p).
+const Version3 byte = 3
+
 // SupportedFrameVersion — true для версий, которые умеет декодировать текущий бинарник.
 func SupportedFrameVersion(v byte) bool {
-	return v == Version || v == Version2
+	return v == Version || v == Version2 || v == Version3
 }
 
 // Флаги кадра и пакета. Младший бит — gzip полезной нагрузки.

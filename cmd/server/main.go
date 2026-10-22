@@ -129,23 +129,36 @@ func main() {
 			log.Printf("CONTENT_ENCRYPTION_KEY не задан — используется ephemeral dev-ключ")
 		}
 		var ret retrieval.VideoRetriever
-		workerJS := retrieval.ResolveWorkerJS(cfg.BrowserRetrieverJS)
 		tempDir := cfg.BrowserRetrieverTemp
 		if tempDir == "" {
 			tempDir = cfg.TempPath
 		}
-		if workerJS != "" {
-			pw := retrieval.NewPlaywright(workerJS, tempDir, time.Duration(cfg.BrowserRetrieverTimeoutSec)*time.Second, 64<<20)
-			pw.Headless = cfg.BrowserRetrieverHeadless
-			if err := pw.Available(context.Background()); err != nil {
-				log.Printf("playwright retriever недоступен (%v) — fallback SSYouTube/manual", err)
-				ret = retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+		studioJS := retrieval.ResolveStudioWorkerJS(cfg.StudioRetrieverJS)
+		if studioJS != "" && cfg.StudioBrowserProfile != "" {
+			st := retrieval.NewStudio(studioJS, cfg.StudioBrowserProfile, tempDir, time.Duration(cfg.BrowserRetrieverTimeoutSec)*time.Second, cfg.MaxTempBytes)
+			st.Headless = cfg.StudioRetrieverHeadless
+			if err := st.Available(context.Background()); err != nil {
+				log.Printf("studio retriever недоступен (%v) — пробуем SSYouTube Playwright", err)
 			} else {
-				ret = pw
-				log.Printf("retrieval: playwright worker=%s temp=%s", workerJS, tempDir)
+				ret = st
+				log.Printf("retrieval: YouTube Studio worker=%s profile=%s temp=%s", studioJS, cfg.StudioBrowserProfile, tempDir)
 			}
-		} else {
-			ret = retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+		}
+		if ret == nil {
+			workerJS := retrieval.ResolveWorkerJS(cfg.BrowserRetrieverJS)
+			if workerJS != "" {
+				pw := retrieval.NewPlaywright(workerJS, tempDir, time.Duration(cfg.BrowserRetrieverTimeoutSec)*time.Second, 64<<20)
+				pw.Headless = cfg.BrowserRetrieverHeadless
+				if err := pw.Available(context.Background()); err != nil {
+					log.Printf("playwright retriever недоступен (%v) — fallback SSYouTube/manual", err)
+					ret = retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+				} else {
+					ret = pw
+					log.Printf("retrieval: playwright SSYouTube worker=%s temp=%s", workerJS, tempDir)
+				}
+			} else {
+				ret = retrieval.NewSSYouTube(cfg.SSYouTubeAPIURL, 64<<20)
+			}
 		}
 		if d, ok := ret.(interface{ Diagnose(context.Context) retrieval.Meta }); ok {
 			log.Printf("retrieval: %s", d.Diagnose(context.Background()).Message)

@@ -206,6 +206,11 @@ func candidateLayouts(img video.Image, hint *video.Layout) []video.Layout {
 		if layout.Validate() != nil {
 			return
 		}
+		// Extract проецирует Cols×Rows на фактический размер кадра —
+		// логическая геометрия encode (напр. 1080p/b8) допустима на 720p Studio MP4.
+		if img.Width < layout.Cols || img.Height < layout.Rows {
+			return
+		}
 		if _, ok := seen[layout]; ok {
 			return
 		}
@@ -215,10 +220,19 @@ func candidateLayouts(img video.Image, hint *video.Layout) []video.Layout {
 	if hint != nil {
 		add(*hint)
 	}
-	if layout, err := video.NewLayout(1280, 720, 16); err == nil {
-		add(layout)
+	// Известные профили encode (v1/v2/v3) — пробуем независимо от пиксельного размера.
+	for _, spec := range []struct{ w, h, b int }{
+		{1920, 1080, 8},  // codec v2
+		{1280, 720, 16},  // codec v1 / v3-candidate
+		{1280, 720, 10},
+		{1280, 720, 8},
+		{1920, 1080, 16},
+	} {
+		if layout, err := video.NewLayout(spec.w, spec.h, spec.b); err == nil {
+			add(layout)
+		}
 	}
-	for _, block := range []int{16, 8, 32, 4} {
+	for _, block := range []int{16, 10, 8, 32, 4} {
 		if img.Width%block == 0 && img.Height%block == 0 {
 			if layout, err := video.NewLayout(img.Width, img.Height, block); err == nil {
 				add(layout)

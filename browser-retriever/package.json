@@ -2,13 +2,16 @@
   "name": "infidrive-browser-retriever",
   "version": "0.1.0",
   "private": true,
-  "description": "Experimental Playwright worker: SSYouTube UI → MP4 download for A-Tex InfiDrive",
+  "description": "Experimental Playwright workers: SSYouTube + YouTube Studio owner-download for A-Tex InfiDrive",
   "type": "module",
   "bin": {
-    "infidrive-browser-retriever": "./src/cli.mjs"
+    "infidrive-browser-retriever": "./src/cli.mjs",
+    "infidrive-studio-retriever": "./src/studio-cli.mjs"
   },
   "scripts": {
     "retrieve": "node src/cli.mjs",
+    "studio-login": "node src/studio-cli.mjs --login --profile-dir=./.studio-profile",
+    "studio-retrieve": "node src/studio-cli.mjs",
     "install-browser": "playwright install chromium"
   },
   "engines": {

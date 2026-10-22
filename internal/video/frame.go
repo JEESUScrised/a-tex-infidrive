@@ -133,19 +133,24 @@ func Render(layout Layout, hdr FrameHeader, payload []byte, luma0, luma1 byte) (
 // Фактический размер картинки может отличаться от логической сетки:
 // блоки равномерно проецируются на img.Width x img.Height.
 func Extract(img Image, layout Layout) (FrameHeader, []byte, error) {
+	return ExtractOffset(img, layout, 0, 0)
+}
+
+// ExtractOffset — как Extract, но со сдвигом сетки в пикселях (для диагностики привязки).
+func ExtractOffset(img Image, layout Layout, ox, oy int) (FrameHeader, []byte, error) {
 	if err := layout.Validate(); err != nil {
 		return FrameHeader{}, nil, err
 	}
 	if len(img.Pix) != img.Width*img.Height*3 || img.Width < layout.Cols || img.Height < layout.Rows {
 		return FrameHeader{}, nil, ErrFrame
 	}
-	black := meanBlocks(img, layout, 0, 0, 4)
-	white := meanBlocks(img, layout, 0, 4, 4)
+	black := meanBlocksOffset(img, layout, 0, 0, 4, ox, oy)
+	white := meanBlocksOffset(img, layout, 0, 4, 4, ox, oy)
 	if white < black+24 {
 		return FrameHeader{}, nil, ErrFrame
 	}
 	threshold := (black + white) / 2
-	headerBytes := readBits(img, layout, 0, HeaderBytes, threshold)
+	headerBytes := readBitsOffset(img, layout, 0, HeaderBytes, threshold, ox, oy)
 	hdr, err := parseHeader(headerBytes)
 	if err != nil {
 		return FrameHeader{}, nil, err
@@ -156,8 +161,49 @@ func Extract(img Image, layout Layout) (FrameHeader, []byte, error) {
 	if int(hdr.PayloadLen) > layout.PayloadCap() || hdr.ChunkSize == 0 {
 		return FrameHeader{}, nil, ErrFrame
 	}
-	payload := readBits(img, layout, layout.PayloadOffsetBits(), int(hdr.PayloadLen), threshold)
+	payload := readBitsOffset(img, layout, layout.PayloadOffsetBits(), int(hdr.PayloadLen), threshold, ox, oy)
 	return hdr, payload, nil
+}
+
+// ProbeHeader анализирует заголовок без полной выборки payload (для диагностики).
+func ProbeHeader(img Image, layout Layout, ox, oy int) (black, white, threshold float64, magicOK, crcOK bool, hdr FrameHeader, raw []byte) {
+	if layout.Validate() != nil || len(img.Pix) != img.Width*img.Height*3 || img.Width < layout.Cols || img.Height < layout.Rows {
+		return
+	}
+	black = meanBlocksOffset(img, layout, 0, 0, 4, ox, oy)
+	white = meanBlocksOffset(img, layout, 0, 4, 4, ox, oy)
+	if white < black+24 {
+		return black, white, 0, false, false, FrameHeader{}, nil
+	}
+	threshold = (black + white) / 2
+	raw = readBitsOffset(img, layout, 0, HeaderBytes, threshold, ox, oy)
+	if len(raw) < HeaderBytes {
+		return black, white, threshold, false, false, FrameHeader{}, raw
+	}
+	magicOK = binary.BigEndian.Uint32(raw[0:]) == Magic
+	sum := crc32.ChecksumIEEE(raw[:36])
+	crcOK = magicOK && sum == binary.BigEndian.Uint32(raw[36:])
+	if h, err := parseHeader(raw); err == nil {
+		hdr = h
+	}
+	return black, white, threshold, magicOK, crcOK, hdr, raw
+}
+
+// BlockConfidence доля блоков заголовка с уверенным отступом от порога.
+func BlockConfidence(img Image, layout Layout, threshold float64, ox, oy int, bits int) (confident, total int) {
+	if bits <= 0 {
+		bits = HeaderBytes * 8
+	}
+	for bit := 0; bit < bits; bit++ {
+		row := 1 + bit/layout.Cols
+		col := bit % layout.Cols
+		m := blockMeanOffset(img, layout, row, col, ox, oy)
+		total++
+		if m >= threshold+12 || m <= threshold-12 {
+			confident++
+		}
+	}
+	return confident, total
 }
 
 func fill(img Image, luma byte) {
@@ -199,26 +245,8 @@ func writeBits(img Image, layout Layout, bit0 int, data []byte, luma0, luma1 byt
 	}
 }
 
-func readBits(img Image, layout Layout, bit0, nbytes int, threshold float64) []byte {
-	out := make([]byte, nbytes)
-	bit := bit0
-	for i := 0; i < nbytes; i++ {
-		var value byte
-		for shift := 7; shift >= 0; shift-- {
-			row := 1 + bit/layout.Cols
-			col := bit % layout.Cols
-			if blockMean(img, layout, row, col) >= threshold {
-				value |= 1 << uint(shift)
-			}
-			bit++
-		}
-		out[i] = value
-	}
-	return out
-}
-
 func fillBlock(img Image, layout Layout, row, col int, luma byte) {
-	x0, y0, x1, y1 := blockRect(img.Width, img.Height, layout.Cols, layout.Rows, col, row)
+	x0, y0, x1, y1 := blockRect(img.Width, img.Height, layout.Cols, layout.Rows, col, row, 0, 0)
 	for y := y0; y < y1; y++ {
 		rowOff := y * img.Width * 3
 		for x := x0; x < x1; x++ {
@@ -231,15 +259,23 @@ func fillBlock(img Image, layout Layout, row, col int, luma byte) {
 }
 
 func meanBlocks(img Image, layout Layout, row, col, count int) float64 {
+	return meanBlocksOffset(img, layout, row, col, count, 0, 0)
+}
+
+func meanBlocksOffset(img Image, layout Layout, row, col, count, ox, oy int) float64 {
 	var sum float64
 	for i := 0; i < count; i++ {
-		sum += blockMean(img, layout, row, col+i)
+		sum += blockMeanOffset(img, layout, row, col+i, ox, oy)
 	}
 	return sum / float64(count)
 }
 
 func blockMean(img Image, layout Layout, row, col int) float64 {
-	x0, y0, x1, y1 := blockRect(img.Width, img.Height, layout.Cols, layout.Rows, col, row)
+	return blockMeanOffset(img, layout, row, col, 0, 0)
+}
+
+func blockMeanOffset(img Image, layout Layout, row, col, ox, oy int) float64 {
+	x0, y0, x1, y1 := blockRect(img.Width, img.Height, layout.Cols, layout.Rows, col, row, ox, oy)
 	w := x1 - x0
 	h := y1 - y0
 	ix := w / 4
@@ -266,11 +302,45 @@ func blockMean(img Image, layout Layout, row, col int) float64 {
 	return sum / float64(n)
 }
 
-func blockRect(width, height, cols, rows, col, row int) (x0, y0, x1, y1 int) {
-	x0 = col * width / cols
-	x1 = (col + 1) * width / cols
-	y0 = row * height / rows
-	y1 = (row + 1) * height / rows
+func readBits(img Image, layout Layout, bit0, nbytes int, threshold float64) []byte {
+	return readBitsOffset(img, layout, bit0, nbytes, threshold, 0, 0)
+}
+
+func readBitsOffset(img Image, layout Layout, bit0, nbytes int, threshold float64, ox, oy int) []byte {
+	out := make([]byte, nbytes)
+	bit := bit0
+	for i := 0; i < nbytes; i++ {
+		var value byte
+		for shift := 7; shift >= 0; shift-- {
+			row := 1 + bit/layout.Cols
+			col := bit % layout.Cols
+			if blockMeanOffset(img, layout, row, col, ox, oy) >= threshold {
+				value |= 1 << uint(shift)
+			}
+			bit++
+		}
+		out[i] = value
+	}
+	return out
+}
+
+func blockRect(width, height, cols, rows, col, row, ox, oy int) (x0, y0, x1, y1 int) {
+	x0 = col*width/cols + ox
+	x1 = (col+1)*width/cols + ox
+	y0 = row*height/rows + oy
+	y1 = (row+1)*height/rows + oy
+	if x0 < 0 {
+		x0 = 0
+	}
+	if y0 < 0 {
+		y0 = 0
+	}
+	if x1 > width {
+		x1 = width
+	}
+	if y1 > height {
+		y1 = height
+	}
 	if x1 <= x0 {
 		x1 = x0 + 1
 		if x1 > width {

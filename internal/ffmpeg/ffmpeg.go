@@ -279,22 +279,50 @@ func (r Runner) EncodeVideo(ctx context.Context, output string, spec Spec, frame
 // После закрытия канала кадров нужно прочитать errc.
 // Отмена ctx останавливает процесс.
 func (r Runner) DecodeVideo(ctx context.Context, path string) (int, int, <-chan video.Image, <-chan error, error) {
-	bin, err := r.look(r.FFmpeg)
-	if err != nil {
-		return 0, 0, nil, nil, err
-	}
 	w, h, err := r.Probe(ctx, path)
 	if err != nil {
 		return 0, 0, nil, nil, err
 	}
-	cmd := exec.CommandContext(ctx, bin,
+	return r.decodeRaw(ctx, path, w, h, "")
+}
+
+// DecodeVideoScaled декодирует в RGB24 с масштабированием без промежуточного lossy MP4.
+// flags — FFmpeg scale flags: neighbor, bilinear, bicubic, lanczos (пусто = bilinear).
+func (r Runner) DecodeVideoScaled(ctx context.Context, path string, width, height int, flags string) (int, int, <-chan video.Image, <-chan error, error) {
+	if width < 16 || height < 16 || width > 3840 || height > 2160 {
+		return 0, 0, nil, nil, fmt.Errorf("%w: недопустимый масштаб %dx%d", ErrRun, width, height)
+	}
+	switch flags {
+	case "", "neighbor", "bilinear", "bicubic", "lanczos", "area", "sinc", "spline":
+	default:
+		return 0, 0, nil, nil, fmt.Errorf("%w: неизвестный scale flags %q", ErrRun, flags)
+	}
+	vf := fmt.Sprintf("scale=%d:%d", width, height)
+	if flags != "" {
+		vf = fmt.Sprintf("scale=%d:%d:flags=%s", width, height, flags)
+	}
+	return r.decodeRaw(ctx, path, width, height, vf)
+}
+
+func (r Runner) decodeRaw(ctx context.Context, path string, w, h int, vf string) (int, int, <-chan video.Image, <-chan error, error) {
+	bin, err := r.look(r.FFmpeg)
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	args := []string{
 		"-hide_banner", "-loglevel", "error",
 		"-i", path,
 		"-an",
+	}
+	if vf != "" {
+		args = append(args, "-vf", vf)
+	}
+	args = append(args,
 		"-f", "rawvideo",
 		"-pix_fmt", "rgb24",
 		"pipe:1",
 	)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	hideWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -377,6 +405,8 @@ func (r Runner) Transcode(ctx context.Context, input, output string, crf int, sc
 	case "":
 	case "640x360":
 		args = append(args, "-vf", "scale=640:360")
+	case "1280x720":
+		args = append(args, "-vf", "scale=1280:720")
 	default:
 		return fmt.Errorf("%w: неподдерживаемый масштаб %q", ErrRun, scale)
 	}

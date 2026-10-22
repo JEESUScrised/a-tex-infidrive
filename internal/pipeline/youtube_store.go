@@ -288,9 +288,11 @@ func (s *Service) downloadChunks(ctx context.Context, f drive.File, chunks []dri
 		sum := sha256.Sum256(plain)
 		got := hex.EncodeToString(sum[:])
 		if ch.ChunkSHA256 != "" && !strings.EqualFold(got, ch.ChunkSHA256) {
+			_ = s.meta.SetChunkRecovery(ch.ID, "failed")
+			_ = s.meta.SetRecoveryStatus(f.ID, "failed")
 			return "", nil, fmt.Errorf("%w: chunk %d hash", ErrIntegrity, ch.ChunkIndex)
 		}
-		_ = s.meta.SetChunkRecovery(ch.ID, "ok")
+		_ = s.meta.SetChunkRecovery(ch.ID, "verified")
 		out = append(out, plain...)
 	}
 	if progress != nil {
@@ -303,8 +305,10 @@ func (s *Service) downloadChunks(ctx context.Context, f drive.File, chunks []dri
 		expected, _ = s.meta.PlainSHA(f.ID)
 	}
 	if expected != "" && !strings.EqualFold(got, expected) {
+		_ = s.meta.SetRecoveryStatus(f.ID, "failed")
 		return "", nil, fmt.Errorf("%w: expected %s got %s", ErrIntegrity, expected, got)
 	}
+	_ = s.meta.SetRecoveryStatus(f.ID, "verified")
 	if progress != nil {
 		progress("done", 100, "Готово")
 	}
